@@ -7,7 +7,7 @@ import { env } from '@/lib/env'
 
 export const metadata: Metadata = {
   title: 'AI Simulator',
-  description: 'Upload a photo, choose a procedure and generate an AI simulation of the result on your own face or body.',
+  description: 'Upload a front and a side-profile photo, choose a procedure and generate an AI simulation of the result on your own face or body.',
   alternates: { canonical: '/simulator' },
 }
 

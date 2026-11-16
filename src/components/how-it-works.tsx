@@ -9,8 +9,8 @@ import type { SceneMode } from './three/face-scene'
 
 const STEPS: Array<{ title: string; body: string; mode: SceneMode }> = [
   {
-    title: 'Upload one photo',
-    body: 'A clear, evenly lit photo of your face or body. It is re-encoded, stripped of location data and stored privately under your account.',
+    title: 'Upload front and profile',
+    body: 'Two clear, evenly lit photos: one facing the camera and one from the side. Each is re-encoded, stripped of location data and stored privately under your account.',
     mode: 'idle',
   },
   {
@@ -20,7 +20,7 @@ const STEPS: Array<{ title: string; body: string; mode: SceneMode }> = [
   },
   {
     title: 'Compare before and after',
-    body: 'The model edits only the treated area of your own photo. Drag the slider across the two images, then download or delete the result.',
+    body: 'The model edits only the treated area of your own photos. Drag the slider on the front view and on the profile, then download or delete the result.',
     mode: 'sweep',
   },
 ]

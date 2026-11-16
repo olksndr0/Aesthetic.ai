@@ -6,9 +6,9 @@ export const CONTENT_DEFAULTS = {
     'Experience the future of aesthetic surgery. Upload your photo, choose your procedure and visualize a personalized AI-generated simulation of your potential transformation.',
   'simulator.title': 'Visualize Your Transformation',
   'simulator.subtitle':
-    'Upload one photo, pick a procedure and set how far the change goes. The AI edits your own photo and leaves everything else as it was.',
+    'Upload a front and a profile photo, pick a procedure and set how far the change goes. The AI edits your own photos and leaves everything else as it was.',
   'how.title': 'How the simulation is made',
-  'procedures.title': 'Twelve procedures, one photo',
+  'procedures.title': 'Twelve procedures, front and profile',
   'pricing.title': 'Plans for one simulation or thirty',
   'privacy.title': 'Your photo stays yours',
   'about.mission':
@@ -36,7 +36,7 @@ export const DEFAULT_FAQS: Array<{ question: string; answer: string }> = [
   {
     question: 'How does AI Surgery Simulation work?',
     answer:
-      'You upload a photo and choose a procedure. An image-to-image AI model receives your photo with an instruction that describes only the anatomical change of that procedure, and returns an edited version of the same photo. Lighting, background and every feature outside the treated area are meant to stay as they were.',
+      'You upload two photos, a front view and a side profile, and choose a procedure. An image-to-image AI model receives each photo with an instruction that describes only the anatomical change of that procedure, and returns an edited version of the same photo, so you see the result from both angles. Lighting, background and every feature outside the treated area are meant to stay as they were.',
   },
   {
     question: 'Are the results realistic?',

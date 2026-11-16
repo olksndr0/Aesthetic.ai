@@ -14,9 +14,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params
   const url = new URL(request.url)
   const type = url.searchParams.get('type') === 'original' ? 'original' : 'result'
+  const view = url.searchParams.get('view') === 'profile' ? 'profile' : 'front'
 
   const simulation = await db.simulation.findFirst({ where: { id, userId: user.id } })
-  const key = type === 'original' ? simulation?.originalKey : simulation?.resultKey
+  const key =
+    view === 'profile'
+      ? type === 'original'
+        ? simulation?.profileOriginalKey
+        : simulation?.profileResultKey
+      : type === 'original'
+        ? simulation?.originalKey
+        : simulation?.resultKey
   if (!simulation || !key) return jsonError(404, 'not_found', 'Image not found.')
 
   let data: Buffer
@@ -33,7 +41,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     'X-Content-Type-Options': 'nosniff',
   })
   if (url.searchParams.get('download') === '1') {
-    headers.set('Content-Disposition', `attachment; filename="aesthetic-ai-${simulation.procedure}-${type}.jpg"`)
+    headers.set('Content-Disposition', `attachment; filename="aesthetic-ai-${simulation.procedure}-${view}-${type}.jpg"`)
   }
   return new Response(new Uint8Array(data), { headers })
 }

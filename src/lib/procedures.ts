@@ -36,7 +36,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'tip', label: 'Refined tip', prompt: 'make the nasal tip slightly narrower and better defined' },
       { id: 'width', label: 'Narrower width', prompt: 'slightly narrow the nostril base and the width of the nose' },
     ],
-    photoGuide: 'Front or three-quarter portrait, face fully visible, even light.',
+    photoGuide: 'Face fully visible in both photos, even light.',
   },
   {
     slug: 'lip-fillers',
@@ -53,7 +53,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'upper', label: 'Upper lip', prompt: 'add volume mainly to the upper lip and define the cupid’s bow' },
       { id: 'definition', label: 'Border definition', prompt: 'define the lip border with very little added volume' },
     ],
-    photoGuide: 'Front portrait, mouth closed and relaxed.',
+    photoGuide: 'Mouth closed and relaxed in both photos.',
   },
   {
     slug: 'chin-augmentation',
@@ -70,7 +70,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'length', label: 'More length', prompt: 'add slight vertical length to the chin' },
       { id: 'shape', label: 'Softer shape', prompt: 'round and balance the chin contour' },
     ],
-    photoGuide: 'Front or profile portrait with the chin and neck visible.',
+    photoGuide: 'Chin and neck visible in both photos.',
   },
   {
     slug: 'jawline-contouring',
@@ -87,7 +87,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'slim', label: 'Slimmer lower face', prompt: 'slightly slim the jaw angle for a narrower lower face' },
       { id: 'angle', label: 'Stronger angle', prompt: 'make the jaw angle slightly more structured' },
     ],
-    photoGuide: 'Front or three-quarter portrait, hair away from the jaw.',
+    photoGuide: 'Hair away from the jaw in both photos.',
   },
   {
     slug: 'cheek-enhancement',
@@ -103,7 +103,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'lift', label: 'Lifted cheekbones', prompt: 'add volume high on the cheekbones for a lifted look' },
       { id: 'fullness', label: 'Mid-cheek fullness', prompt: 'restore soft fullness to the mid cheek' },
     ],
-    photoGuide: 'Front portrait, neutral expression.',
+    photoGuide: 'Neutral expression in both photos.',
   },
   {
     slug: 'facelift',
@@ -119,7 +119,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'lower', label: 'Lower face', prompt: 'focus on jowls and the folds beside the mouth' },
       { id: 'neck', label: 'Face and neck', prompt: 'include the neck and the area under the chin' },
     ],
-    photoGuide: 'Front portrait with the neck visible, neutral expression.',
+    photoGuide: 'Neck visible and neutral expression in both photos.',
   },
   {
     slug: 'blepharoplasty',
@@ -136,7 +136,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'lower', label: 'Lower eyelids', prompt: 'reduce puffiness and bags under the eyes' },
       { id: 'both', label: 'Upper and lower', prompt: 'reduce upper-lid hooding and under-eye puffiness' },
     ],
-    photoGuide: 'Front portrait, eyes open, no glasses.',
+    photoGuide: 'Eyes open, no glasses.',
   },
   {
     slug: 'brow-lift',
@@ -152,7 +152,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'even', label: 'Even lift', prompt: 'raise the whole brow evenly by a small amount' },
       { id: 'lateral', label: 'Outer brow', prompt: 'lift mainly the outer third of the brows' },
     ],
-    photoGuide: 'Front portrait, forehead uncovered.',
+    photoGuide: 'Forehead uncovered in both photos.',
   },
   {
     slug: 'botox',
@@ -170,7 +170,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'crow', label: 'Crow’s feet', prompt: 'soften the lines at the outer corners of the eyes' },
       { id: 'all', label: 'All three areas', prompt: 'soften forehead lines, frown lines and crow’s feet' },
     ],
-    photoGuide: 'Front portrait, neutral expression.',
+    photoGuide: 'Neutral expression in both photos.',
   },
   {
     slug: 'breast-augmentation',
@@ -186,7 +186,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'natural', label: 'Natural profile', prompt: 'use a natural teardrop profile' },
       { id: 'fuller', label: 'Fuller profile', prompt: 'use a fuller, rounder upper profile' },
     ],
-    photoGuide: 'Clothed photo of the torso, front or three-quarter view, in a fitted top or sportswear.',
+    photoGuide: 'Clothed photos of the torso, in a fitted top or sportswear.',
   },
   {
     slug: 'liposuction',
@@ -203,7 +203,7 @@ export const PROCEDURES: Procedure[] = [
       { id: 'abdomen', label: 'Abdomen', prompt: 'reduce fullness of the abdomen' },
       { id: 'thighs', label: 'Thighs', prompt: 'slim the outer and inner thighs' },
     ],
-    photoGuide: 'Clothed photo in fitted clothing or sportswear, standing, front or side view.',
+    photoGuide: 'Clothed photos in fitted clothing or sportswear, standing.',
   },
   {
     slug: 'tummy-tuck',
@@ -219,9 +219,44 @@ export const PROCEDURES: Procedure[] = [
       { id: 'full', label: 'Full abdomen', prompt: 'flatten the whole abdomen from ribcage to hips' },
       { id: 'lower', label: 'Lower abdomen', prompt: 'flatten mainly the area below the navel' },
     ],
-    photoGuide: 'Clothed photo in fitted clothing or sportswear, standing, front or side view.',
+    photoGuide: 'Clothed photos in fitted clothing or sportswear, standing.',
   },
 ]
+
+export const VIEWS = ['front', 'profile'] as const
+/** Every simulation takes both: the front view and the side profile. */
+export type View = (typeof VIEWS)[number]
+
+export const VIEW_LABELS: Record<View, string> = { front: 'Front view', profile: 'Side profile' }
+
+export function isView(value: unknown): value is View {
+  return typeof value === 'string' && (VIEWS as readonly string[]).includes(value)
+}
+
+/** What the upload slot asks for. */
+export function viewGuide(area: ProcedureArea, view: View): string {
+  if (area === 'face') {
+    return view === 'front'
+      ? 'Face the camera straight on, head level, neutral expression, hair away from the face.'
+      : 'Turn 90° so the camera sees one side of your face: nose, lips and chin in outline, head level.'
+  }
+  return view === 'front' ? 'Stand facing the camera, arms relaxed.' : 'Stand side-on to the camera, arms clear of the torso.'
+}
+
+const VIEW_PROMPTS: Record<ProcedureArea, Record<View, string>> = {
+  face: {
+    front:
+      'This photograph is the front view of the face. A side-profile photograph of the same person receives the same procedure, so the change must be one that reads identically from the side.',
+    profile:
+      'This photograph is the side profile of the face. A front-view photograph of the same person receives the same procedure: show how that same change appears in the profile outline, and keep the head angle exactly as photographed.',
+  },
+  body: {
+    front:
+      'This photograph is the front view of the body. A side-view photograph of the same person receives the same procedure, so the change must be one that reads identically from the side.',
+    profile:
+      'This photograph is the side view of the body. A front-view photograph of the same person receives the same procedure: show how that same change appears in the side outline, and keep the body angle exactly as photographed.',
+  },
+}
 
 export function getProcedure(slug: string): Procedure | undefined {
   return PROCEDURES.find(procedure => procedure.slug === slug)
@@ -237,13 +272,15 @@ export type SimulationParams = { intensity: number; focus: string }
 
 /**
  * The instruction sent to the image-to-image model. Identity preservation comes
- * first: everything not named by the procedure must stay as photographed.
+ * first: everything not named by the procedure must stay as photographed. Each
+ * view is edited on its own with the same procedure, focus and intensity.
  */
-export function buildPrompt(procedure: Procedure, params: SimulationParams): string {
+export function buildPrompt(procedure: Procedure, params: SimulationParams, view: View): string {
   const focus = procedure.focus.find(option => option.id === params.focus) ?? procedure.focus[0]
   const change = procedure.edit.replace('{amount}', intensityWord(params.intensity))
   const lines = [
     'Edit this exact photograph. Do not generate a new person or a new photo.',
+    VIEW_PROMPTS[procedure.area][view],
     `${change}${focus ? `; ${focus.prompt}` : ''}.`,
     procedure.area === 'face'
       ? 'Keep the identity of the person exactly: the same eyes and eye colour, eyebrows, skin tone, skin texture, moles and freckles, hairline and hair, ears, expression, age and every facial proportion outside the treated area.'

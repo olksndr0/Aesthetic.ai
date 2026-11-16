@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { DEFAULT_FAQS } from '@/lib/content-defaults'
 import { DEFAULT_PLANS, creditsForInterval, formatPrice, yearlySavingPercent } from '@/lib/plans'
-import { PROCEDURES, buildPrompt, getProcedure, intensityWord } from '@/lib/procedures'
+import { PROCEDURES, VIEWS, buildPrompt, getProcedure, intensityWord, isView } from '@/lib/procedures'
 import { createQueue } from '@/lib/queue'
 import { clientIp, rateLimit, resetRateLimits } from '@/lib/rate-limit'
 import { sniffImage } from '@/lib/upload-rules'
@@ -24,7 +24,7 @@ describe('procedures', () => {
   })
 
   it('builds a prompt that edits one area and protects identity and scene', () => {
-    const prompt = buildPrompt(getProcedure('rhinoplasty')!, { intensity: 20, focus: 'tip' })
+    const prompt = buildPrompt(getProcedure('rhinoplasty')!, { intensity: 20, focus: 'tip' }, 'front')
     expect(prompt).toContain('subtle, conservative rhinoplasty')
     expect(prompt).toContain('nasal tip')
     expect(prompt).toMatch(/Keep the identity of the person exactly/)
@@ -32,14 +32,27 @@ describe('procedures', () => {
     expect(prompt).not.toContain('{amount}')
   })
 
+  it('asks for the same change in both views and tells the model which one it is editing', () => {
+    const params = { intensity: 50, focus: 'bridge' }
+    const front = buildPrompt(getProcedure('rhinoplasty')!, params, 'front')
+    const profile = buildPrompt(getProcedure('rhinoplasty')!, params, 'profile')
+    expect(front).toContain('front view of the face')
+    expect(profile).toContain('side profile of the face')
+    expect(profile).toContain('keep the head angle exactly as photographed')
+    for (const prompt of [front, profile]) expect(prompt).toContain('moderate, natural-looking rhinoplasty')
+    expect(VIEWS).toEqual(['front', 'profile'])
+    expect(isView('profile')).toBe(true)
+    expect(isView('three-quarter')).toBe(false)
+  })
+
   it('keeps clothing fixed for body procedures', () => {
-    const prompt = buildPrompt(getProcedure('breast-augmentation')!, { intensity: 60, focus: 'natural' })
+    const prompt = buildPrompt(getProcedure('breast-augmentation')!, { intensity: 60, focus: 'natural' }, 'profile')
     expect(prompt).toMatch(/Keep all clothing exactly as it is/)
     expect(prompt).toMatch(/do not remove clothing/)
   })
 
   it('falls back to the first focus when the option is unknown', () => {
-    const prompt = buildPrompt(getProcedure('lip-fillers')!, { intensity: 90, focus: 'nope' })
+    const prompt = buildPrompt(getProcedure('lip-fillers')!, { intensity: 90, focus: 'nope' }, 'front')
     expect(prompt).toContain('evenly to the upper and lower lip')
     expect(intensityWord(90)).toContain('anatomically realistic')
   })

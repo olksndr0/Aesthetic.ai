@@ -6,7 +6,7 @@ import { getPlan } from '@/lib/content'
 import { db } from '@/lib/db'
 import { jsonError, sameOrigin } from '@/lib/http'
 import { UploadError, finalizeResult, prepareUpload } from '@/lib/images'
-import { buildPrompt, getProcedure } from '@/lib/procedures'
+import { VIEWS, VIEW_LABELS, buildPrompt, getProcedure, type View } from '@/lib/procedures'
 import { rateLimit } from '@/lib/rate-limit'
 import { generationQueue, retentionDate } from '@/lib/simulations'
 import { storage } from '@/lib/storage'
@@ -18,9 +18,16 @@ export const maxDuration = 300
 
 const USER_MESSAGES: Record<string, string> = {
   content_rejected:
-    'The AI provider declined this photo under its safety rules. Try a different, clearly lit and fully clothed photo.',
+    'The AI provider declined one of these photos under its safety rules. Try different, clearly lit and fully clothed photos.',
   timeout: 'The generation took too long and was stopped. Your credit has been returned; please try again.',
   provider_error: 'The AI provider could not complete this simulation. Your credit has been returned; please try again.',
+}
+
+// Front view keeps the original key names, so simulations stored before the
+// profile view existed still resolve.
+const FILES: Record<View, { original: string; result: string }> = {
+  front: { original: 'original.jpg', result: 'result.jpg' },
+  profile: { original: 'profile-original.jpg', result: 'profile-result.jpg' },
 }
 
 export async function POST(request: Request) {
@@ -35,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   const declared = Number(request.headers.get('content-length') ?? 0)
-  if (declared > MAX_UPLOAD_BYTES + 64 * 1024) return jsonError(413, 'too_large', 'The photo is larger than 12 MB.')
+  if (declared > VIEWS.length * MAX_UPLOAD_BYTES + 64 * 1024) return jsonError(413, 'too_large', 'Each photo can be up to 12 MB.')
 
   let form: FormData
   try {
@@ -60,15 +67,24 @@ export async function POST(request: Request) {
     return jsonError(403, 'plan_required', `${procedure.name} is available on Pro and Premium.`)
   }
 
-  const file = form.get('photo')
-  if (!(file instanceof File)) return jsonError(400, 'invalid', 'Attach a photo.')
-  if (file.size > MAX_UPLOAD_BYTES) return jsonError(413, 'too_large', 'The photo is larger than 12 MB.')
-
-  let photo: Awaited<ReturnType<typeof prepareUpload>>
-  try {
-    photo = await prepareUpload(Buffer.from(await file.arrayBuffer()))
-  } catch (error) {
-    return jsonError(400, 'invalid_image', error instanceof UploadError ? error.message : 'The photo could not be read.')
+  // Both views are required: a procedure is judged from the front and in profile.
+  const photos = {} as Record<View, Awaited<ReturnType<typeof prepareUpload>>>
+  for (const view of VIEWS) {
+    const label = VIEW_LABELS[view].toLowerCase()
+    const file = form.get(view)
+    if (!(file instanceof File) || file.size === 0) {
+      return jsonError(400, 'missing_view', `Attach the ${label} photo. Both the front view and the side profile are required.`, { view })
+    }
+    if (file.size > MAX_UPLOAD_BYTES) return jsonError(413, 'too_large', `The ${label} photo is larger than 12 MB.`, { view })
+    try {
+      photos[view] = await prepareUpload(Buffer.from(await file.arrayBuffer()))
+    } catch (error) {
+      const reason = error instanceof UploadError ? error.message : 'The photo could not be read.'
+      return jsonError(400, 'invalid_image', `${VIEW_LABELS[view]}: ${reason}`, { view })
+    }
+  }
+  if (photos.front.data.equals(photos.profile.data)) {
+    return jsonError(400, 'same_photo', 'The front view and the side profile are the same file. Upload two different photos.')
   }
 
   // Checked before any credit is taken or any photo is stored.
@@ -93,23 +109,39 @@ export async function POST(request: Request) {
   const base = `u/${user.id}/${simulation.id}`
   const startedAt = Date.now()
 
-  try {
-    await storage().put(`${base}/original.jpg`, photo.data, 'image/jpeg')
-    await db.simulation.update({ where: { id: simulation.id }, data: { originalKey: `${base}/original.jpg` } })
+  const highResolution = plan.highResolution || isAdmin
 
-    const output = await generationQueue(plan.priority || isAdmin, () =>
-      generateSimulation({
-        image: photo.data,
-        prompt: buildPrompt(procedure, params),
-        highResolution: plan.highResolution || isAdmin,
+  try {
+    await Promise.all(VIEWS.map(view => storage().put(`${base}/${FILES[view].original}`, photos[view].data, 'image/jpeg')))
+    await db.simulation.update({
+      where: { id: simulation.id },
+      data: { originalKey: `${base}/${FILES.front.original}`, profileOriginalKey: `${base}/${FILES.profile.original}` },
+    })
+
+    // One edit per view, same procedure, focus and intensity. Nothing is kept unless both succeed.
+    const outputs = await Promise.all(
+      VIEWS.map(view =>
+        generationQueue(plan.priority || isAdmin, () =>
+          generateSimulation({ image: photos[view].data, prompt: buildPrompt(procedure, params, view), highResolution }),
+        ),
+      ),
+    )
+    await Promise.all(
+      VIEWS.map(async (view, index) => {
+        const result = await finalizeResult(outputs[index]!.image, highResolution ? 2048 : 1024)
+        await storage().put(`${base}/${FILES[view].result}`, result, 'image/jpeg')
       }),
     )
-    const result = await finalizeResult(output.image, plan.highResolution || isAdmin ? 2048 : 1024)
-    await storage().put(`${base}/result.jpg`, result, 'image/jpeg')
 
     await db.simulation.update({
       where: { id: simulation.id },
-      data: { status: 'COMPLETED', resultKey: `${base}/result.jpg`, provider: output.provider, durationMs: Date.now() - startedAt },
+      data: {
+        status: 'COMPLETED',
+        resultKey: `${base}/${FILES.front.result}`,
+        profileResultKey: `${base}/${FILES.profile.result}`,
+        provider: outputs[0]!.provider,
+        durationMs: Date.now() - startedAt,
+      },
     })
 
     const fresh = await db.user.findUnique({ where: { id: user.id }, select: { credits: true } })
@@ -120,11 +152,13 @@ export async function POST(request: Request) {
     console.error('[simulation] failed', simulation.id, code, detail)
 
     // The failed attempt costs nothing and keeps no photo.
-    await storage().remove(`${base}/original.jpg`).catch(() => undefined)
+    await Promise.all(
+      VIEWS.flatMap(view => [FILES[view].original, FILES[view].result]).map(name => storage().remove(`${base}/${name}`).catch(() => undefined)),
+    )
     await db.$transaction([
       db.simulation.update({
         where: { id: simulation.id },
-        data: { status: 'FAILED', errorCode: code, errorMessage: detail.slice(0, 1000), originalKey: null, durationMs: Date.now() - startedAt },
+        data: { status: 'FAILED', errorCode: code, errorMessage: detail.slice(0, 1000), originalKey: null, profileOriginalKey: null, durationMs: Date.now() - startedAt },
       }),
       db.user.update({ where: { id: user.id }, data: { credits: { increment: 1 } } }),
     ])

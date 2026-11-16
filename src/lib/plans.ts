@@ -21,7 +21,7 @@ export const DEFAULT_PLANS: PlanConfig[] = [
   {
     slug: 'starter',
     name: 'Starter',
-    description: 'Try the simulator on one photo.',
+    description: 'Try the simulator once, front and profile.',
     priceMonthlyCents: 0,
     priceYearlyCents: 0,
     credits: 1,

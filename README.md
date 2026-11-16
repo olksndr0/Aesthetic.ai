@@ -1,6 +1,6 @@
 # Aesthetic AI
 
-AI simulation of aesthetic surgery on the user's own photo. Next.js 15 (App Router), React 19, TypeScript strict, Tailwind CSS, Prisma + PostgreSQL, Stripe subscriptions, an image-to-image AI provider (OpenAI or Replicate), private image storage, React Three Fiber, GSAP and Framer Motion.
+AI simulation of aesthetic surgery on the user's own photos: every simulation takes a front view and a side profile and returns a before/after for both. Next.js 15 (App Router), React 19, TypeScript strict, Tailwind CSS, Prisma + PostgreSQL, Stripe subscriptions, an image-to-image AI provider (OpenAI or Replicate), private image storage, React Three Fiber, GSAP and Framer Motion.
 
 > Simulations are illustrative only. The product is not a medical device and its copy says so on every result.
 
@@ -37,6 +37,8 @@ Set one key in `.env` and restart. `AI_PROVIDER` is optional; it is detected fro
 
 - **OpenAI** (`OPENAI_API_KEY`): `POST /v1/images/edits` with `gpt-image-1` and `input_fidelity=high`, which keeps the face of the input photo. Your OpenAI organisation may need to be verified for image models.
 - **Replicate** (`REPLICATE_API_TOKEN`): `black-forest-labs/flux-kontext-pro`, an instruction-driven edit model. Change `REPLICATE_MODEL` to use another Kontext variant.
+
+Every simulation needs two photos, the front view and the side profile, and makes one edit per view with the same procedure, focus and intensity (two provider calls, one credit). Nothing is stored or charged unless both succeed. The two edits are independent: what keeps them consistent is the shared instruction, so compare the two views when you evaluate a provider. Nothing checks that a photo really is a front or a profile shot.
 
 The instruction sent to the model is built in `src/lib/procedures.ts` (`buildPrompt`): it names only the anatomical change of the chosen procedure and tells the model to keep identity, lighting, background, framing and clothing. Tune the wording per procedure there.
 

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { PROCEDURES, getProcedure, type Procedure } from '@/lib/procedures'
+import { PROCEDURES, VIEWS, VIEW_LABELS, getProcedure, isView, viewGuide, type Procedure, type View } from '@/lib/procedures'
 import { ACCEPTED_TYPES, MAX_UPLOAD_BYTES, MIN_SIDE_PX } from '@/lib/upload-rules'
 
 import { BeforeAfter } from './before-after'
@@ -13,7 +13,10 @@ import { BeforeAfter } from './before-after'
 type Viewer = { isSignedIn: boolean; credits: number; hasAllProcedures: boolean }
 type Props = { viewer: Viewer; initialProcedure: string; disclaimer: string; retentionDays: number }
 
-type Failure = { code: string; message: string; setup?: string }
+type Failure = { code: string; message: string; setup?: string; view?: string }
+type PerView<T> = Record<View, T>
+
+const EMPTY: PerView<null> = { front: null, profile: null }
 type Phase = { kind: 'compose' } | { kind: 'generating'; startedAt: number } | { kind: 'done'; id: string }
 
 const CONSENTS = [
@@ -65,15 +68,13 @@ function intensityLabel(value: number): string {
 
 export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays }: Props) {
   const router = useRouter()
-  const input = useRef<HTMLInputElement>(null)
   const [procedure, setProcedure] = useState<Procedure>(() => getProcedure(initialProcedure) ?? PROCEDURES[0]!)
   const [focus, setFocus] = useState(procedure.focus[0]?.id ?? '')
   const [intensity, setIntensity] = useState(50)
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [fileError, setFileError] = useState<string | null>(null)
+  const [files, setFiles] = useState<PerView<File | null>>(EMPTY)
+  const [previews, setPreviews] = useState<PerView<string | null>>(EMPTY)
+  const [fileErrors, setFileErrors] = useState<PerView<string | null>>(EMPTY)
   const [consents, setConsents] = useState<Record<string, boolean>>({})
-  const [isOver, setIsOver] = useState(false)
   const [phase, setPhase] = useState<Phase>({ kind: 'compose' })
   const [failure, setFailure] = useState<Failure | null>(null)
   const [credits, setCredits] = useState(viewer.credits)
@@ -81,6 +82,8 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
 
   const isLocked = !procedure.starter && !viewer.hasAllProcedures
   const hasConsent = CONSENTS.every(consent => consents[consent.id])
+  const missing = VIEWS.filter(view => !files[view])
+  const hasBothPhotos = missing.length === 0
   const groups = useMemo(
     () => [
       { title: 'Face', items: PROCEDURES.filter(item => item.area === 'face') },
@@ -89,7 +92,17 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
     [],
   )
 
-  useEffect(() => () => void (preview && URL.revokeObjectURL(preview)), [preview])
+  // Object URLs are released when a photo is replaced or the page is left.
+  const liveUrls = useRef(previews)
+  liveUrls.current = previews
+  useEffect(() => () => VIEWS.forEach(view => liveUrls.current[view] && URL.revokeObjectURL(liveUrls.current[view]!)), [])
+
+  function setPreview(view: View, url: string | null) {
+    setPreviews(current => {
+      if (current[view]) URL.revokeObjectURL(current[view]!)
+      return { ...current, [view]: url }
+    })
+  }
 
   useEffect(() => {
     if (phase.kind !== 'generating') return
@@ -104,37 +117,46 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
     window.history.replaceState(null, '', `/simulator?procedure=${next.slug}`)
   }
 
-  async function takeFile(next: File | undefined) {
+  async function takeFile(view: View, next: File | undefined) {
     if (!next) return
     setFailure(null)
-    const problem = await checkFile(next)
+    const other = files[view === 'front' ? 'profile' : 'front']
+    const problem =
+      other && other.name === next.name && other.size === next.size && other.lastModified === next.lastModified
+        ? 'This is the same file as the other view. Upload two different photos.'
+        : await checkFile(next)
     if (problem) {
-      setFileError(problem)
+      setFileErrors(current => ({ ...current, [view]: problem }))
       return
     }
-    setFileError(null)
-    setFile(next)
-    setPreview(URL.createObjectURL(next))
+    setFileErrors(current => ({ ...current, [view]: null }))
+    setFiles(current => ({ ...current, [view]: next }))
+    setPreview(view, URL.createObjectURL(next))
+  }
+
+  function removeFile(view: View) {
+    setFiles(current => ({ ...current, [view]: null }))
+    setFileErrors(current => ({ ...current, [view]: null }))
+    setPreview(view, null)
   }
 
   function reset() {
-    setFile(null)
-    setPreview(null)
-    setFileError(null)
+    VIEWS.forEach(removeFile)
     setFailure(null)
     setConsents({})
     setPhase({ kind: 'compose' })
-    if (input.current) input.current.value = ''
   }
 
   async function generate() {
-    if (!file || !hasConsent || isLocked) return
+    const { front, profile } = files
+    if (!front || !profile || !hasConsent || isLocked) return
     setFailure(null)
     setElapsed(0)
     setPhase({ kind: 'generating', startedAt: Date.now() })
 
     const body = new FormData()
-    body.set('photo', file)
+    body.set('front', front)
+    body.set('profile', profile)
     body.set('procedure', procedure.slug)
     body.set('focus', focus)
     body.set('intensity', String(intensity))
@@ -150,7 +172,13 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
         router.refresh()
         return
       }
-      setFailure(json?.error ?? { code: 'unknown', message: 'The simulation could not be generated. Please try again.' })
+      const error = json?.error ?? { code: 'unknown', message: 'The simulation could not be generated. Please try again.' }
+      setFailure(error)
+      // A photo the server refused goes back to its slot, so only that one is replaced.
+      if (isView(error.view) && (error.code === 'invalid_image' || error.code === 'missing_view' || error.code === 'too_large')) {
+        removeFile(error.view)
+        setFileErrors(current => ({ ...current, [error.view as View]: error.message }))
+      }
     } catch {
       setFailure({ code: 'network', message: 'The connection was lost before the simulation finished. Check your network and try again.' })
     }
@@ -327,13 +355,13 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
                 Get more simulations
               </Link>
             ) : (
-              <button type="button" onClick={generate} disabled={!file || !hasConsent || isGenerating} className="btn-primary w-full">
+              <button type="button" onClick={generate} disabled={!hasBothPhotos || !hasConsent || isGenerating} className="btn-primary w-full">
                 {isGenerating ? 'Generating…' : 'Generate My Result'}
               </button>
             )}
             <p className="text-center text-sm text-ash">
               {viewer.isSignedIn
-                ? `${credits} simulation${credits === 1 ? '' : 's'} left${!file ? ' · add a photo to start' : !hasConsent ? ' · confirm the three boxes' : ''}`
+                ? `${credits} simulation${credits === 1 ? '' : 's'} left${missing.length === 2 ? ' · add your front and profile photos to start' : missing.length === 1 ? ` · add the ${VIEW_LABELS[missing[0]!].toLowerCase()} photo` : !hasConsent ? ' · confirm the three boxes' : ''}`
                 : 'One free simulation with every new account.'}
             </p>
           </div>
@@ -368,90 +396,60 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
       {/* Photo and result */}
       <div className="order-1 lg:order-2">
         <div className="lg:sticky lg:top-24">
-          {phase.kind === 'done' && preview ? (
-            <motion.div initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}>
-              <BeforeAfter
-                beforeSrc={preview}
-                afterSrc={`/api/simulations/${phase.id}/image?type=result`}
-                downloadHref={`/api/simulations/${phase.id}/image?type=result&download=1`}
-              />
+          {phase.kind === 'done' && previews.front && previews.profile ? (
+            <motion.div initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, ease: EASE }}>
+              <div className="grid gap-5 sm:grid-cols-2">
+                {VIEWS.map(view => (
+                  <div key={view}>
+                    <p className="eyebrow mb-3">{VIEW_LABELS[view]}</p>
+                    <BeforeAfter
+                      beforeSrc={previews[view]!}
+                      afterSrc={`/api/simulations/${phase.id}/image?type=result&view=${view}`}
+                      downloadHref={`/api/simulations/${phase.id}/image?type=result&view=${view}&download=1`}
+                    />
+                  </div>
+                ))}
+              </div>
               <p className="mt-4 text-sm leading-relaxed text-ash">{disclaimer}</p>
               <div className="mt-5 flex flex-wrap gap-2">
                 <button type="button" onClick={reset} className="btn-ghost btn-sm min-h-[44px]">
                   New simulation
                 </button>
                 <button type="button" onClick={() => deleteNow(phase.id)} className="btn-ghost btn-sm min-h-[44px]">
-                  Delete photo and result now
+                  Delete photos and results now
                 </button>
                 <Link href="/dashboard" className="btn-ghost btn-sm min-h-[44px]">
                   Open my history
                 </Link>
               </div>
             </motion.div>
-          ) : preview ? (
-            <motion.div initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5, ease: EASE }}>
-              <div className="relative overflow-hidden rounded-2xl border border-line bg-coal">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={preview} alt="Your uploaded photo" className={`max-h-[70vh] w-full object-contain transition duration-700 ${isGenerating ? 'scale-[1.01] opacity-60' : ''}`} />
-                {isGenerating && (
-                  <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-                    <div className="scanline absolute inset-x-0 top-0 h-[10%] bg-gradient-to-b from-transparent via-white/25 to-transparent" />
-                    <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:32px_32px]" />
-                  </div>
-                )}
+          ) : (
+            <div>
+              <div className="grid grid-cols-2 gap-3 sm:gap-5">
+                {VIEWS.map(view => (
+                  <PhotoSlot
+                    key={view}
+                    view={view}
+                    guide={viewGuide(procedure.area, view)}
+                    preview={previews[view]}
+                    fileName={files[view]?.name ?? null}
+                    error={fileErrors[view]}
+                    isGenerating={isGenerating}
+                    onFile={file => void takeFile(view, file)}
+                    onRemove={() => removeFile(view)}
+                  />
+                ))}
               </div>
               {isGenerating ? (
                 <div role="status" aria-live="polite" className="mt-4 flex items-center justify-between gap-4 text-sm">
                   <span>
-                    Generating your {procedure.name.toLowerCase()} simulation. This usually takes 20 to 90 seconds; keep this page open.
+                    Generating your {procedure.name.toLowerCase()} simulation, front and profile. This usually takes 1 to 3 minutes; keep this page open.
                   </span>
                   <span className="shrink-0 font-mono text-ash">{elapsed}s</span>
                 </div>
               ) : (
-                <div className="mt-4 flex items-center justify-between gap-4">
-                  <p className="truncate text-sm text-ash">{file?.name}</p>
-                  <button type="button" onClick={reset} className="btn-ghost btn-sm min-h-[44px] shrink-0">
-                    Remove photo
-                  </button>
-                </div>
-              )}
-            </motion.div>
-          ) : (
-            <div>
-              <label
-                htmlFor="photo"
-                onDragOver={event => {
-                  event.preventDefault()
-                  setIsOver(true)
-                }}
-                onDragLeave={() => setIsOver(false)}
-                onDrop={event => {
-                  event.preventDefault()
-                  setIsOver(false)
-                  void takeFile(event.dataTransfer.files[0])
-                }}
-                className={`flex min-h-[420px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-8 text-center transition duration-300 ${isOver ? 'border-white bg-white/[0.07]' : 'border-white/20 bg-coal/50 hover:border-white/45 hover:bg-coal'}`}
-              >
-                <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20">
-                  <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M11 15V4M6.5 8.5 11 4l4.5 4.5M4 18h14" />
-                  </svg>
-                </span>
-                <span className="mt-5 text-lg font-medium">Upload your photo</span>
-                <span className="mt-2 max-w-xs text-sm leading-relaxed text-ash">{procedure.photoGuide}</span>
-                <span className="mt-4 font-mono text-[11px] uppercase tracking-widest text-ash">JPEG, PNG or WebP · up to 12 MB</span>
-              </label>
-              <input
-                ref={input}
-                id="photo"
-                type="file"
-                accept={ACCEPTED_TYPES.join(',')}
-                onChange={event => void takeFile(event.target.files?.[0])}
-                className="sr-only"
-              />
-              {fileError && (
-                <p role="alert" className="mt-3 text-sm">
-                  {fileError}
+                <p className="mt-4 text-sm leading-relaxed text-ash">
+                  Both photos are required: the same change is simulated from the front and in profile. {procedure.photoGuide} JPEG, PNG or WebP, up to 12 MB each.
                 </p>
               )}
             </div>
@@ -460,5 +458,105 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
       </div>
     </div>
     </MotionConfig>
+  )
+}
+
+type PhotoSlotProps = {
+  view: View
+  guide: string
+  preview: string | null
+  fileName: string | null
+  error: string | null
+  isGenerating: boolean
+  onFile: (file: File | undefined) => void
+  onRemove: () => void
+}
+
+function ViewGlyph({ view }: { view: View }) {
+  return (
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {view === 'front' ? (
+        <>
+          <path d="M13 3.5c-4 0-6.5 2.8-6.5 7 0 5 3 9.5 6.5 9.5s6.5-4.5 6.5-9.500c0-4.2-2.5-7-6.5-7Z" />
+          <path d="M10 11h.01M16 11h.01M11 16c1.2.7 2.8.7 4 0" />
+        </>
+      ) : (
+        <path d="M16.5 3.500c-5.5-.5-9 3-9 7.500l-2 3.8 2 .700v2.300c0 1 .8 1.7 1.8 1.500l2.2-.300V22.500M16.5 3.500c2.5.8 4 3.3 4 6.3 0 3.2-1.5 5.2-2 7.200V22.5" />
+      )}
+    </svg>
+  )
+}
+
+function PhotoSlot({ view, guide, preview, fileName, error, isGenerating, onFile, onRemove }: PhotoSlotProps) {
+  const [isOver, setIsOver] = useState(false)
+  const id = `photo-${view}`
+  const label = VIEW_LABELS[view]
+
+  return (
+    <div>
+      {preview ? (
+        <motion.div initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5, ease: EASE }}>
+          <div className="relative aspect-[4/5] overflow-hidden rounded-2xl border border-line bg-coal">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview} alt={`Your ${label.toLowerCase()} photo`} className={`h-full w-full object-cover transition duration-700 ${isGenerating ? 'scale-[1.01] opacity-60' : ''}`} />
+            <span className="glass pointer-events-none absolute left-3 top-3 rounded-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em]">{label}</span>
+            {isGenerating && (
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="scanline absolute inset-x-0 top-0 h-[10%] bg-gradient-to-b from-transparent via-white/25 to-transparent" />
+                <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:32px_32px]" />
+              </div>
+            )}
+          </div>
+          {!isGenerating && (
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="truncate text-sm text-ash">{fileName}</p>
+              <button type="button" onClick={onRemove} aria-label={`Remove the ${label.toLowerCase()} photo`} className="btn-ghost btn-sm min-h-[44px] shrink-0">
+                Remove
+              </button>
+            </div>
+          )}
+        </motion.div>
+      ) : (
+        <>
+          <label
+            htmlFor={id}
+            onDragOver={event => {
+              event.preventDefault()
+              setIsOver(true)
+            }}
+            onDragLeave={() => setIsOver(false)}
+            onDrop={event => {
+              event.preventDefault()
+              setIsOver(false)
+              onFile(event.dataTransfer.files[0])
+            }}
+            className={`flex aspect-[4/5] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-4 text-center transition duration-300 sm:p-6 ${isOver ? 'border-white bg-white/[0.07]' : 'border-white/20 bg-coal/50 hover:border-white/45 hover:bg-coal'}`}
+          >
+            <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20">
+              <ViewGlyph view={view} />
+            </span>
+            <span className="mt-4 font-medium sm:text-lg">{label}</span>
+            <span className="mt-2 max-w-[16rem] text-xs leading-relaxed text-ash sm:text-sm">{guide}</span>
+            <span className="mt-3 font-mono text-[10px] uppercase tracking-widest text-ash">Required</span>
+          </label>
+          <input
+            id={id}
+            type="file"
+            accept={ACCEPTED_TYPES.join(',')}
+            disabled={isGenerating}
+            onChange={event => {
+              onFile(event.target.files?.[0])
+              event.target.value = ''
+            }}
+            className="sr-only"
+          />
+        </>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-sm">
+          {error}
+        </p>
+      )}
+    </div>
   )
 }

@@ -89,11 +89,14 @@ check('login works', goodLogin.status === 303 && cookieFrom(goodLogin) !== null)
 
 // Uploads
 const photo = await sharp({ create: { width: 900, height: 1100, channels: 3, background: { r: 180, g: 150, b: 130 } } }).jpeg().toBuffer()
+const side = await sharp({ create: { width: 900, height: 1100, channels: 3, background: { r: 150, g: 130, b: 120 } } }).jpeg().toBuffer()
 const tiny = await sharp({ create: { width: 200, height: 200, channels: 3, background: '#888' } }).jpeg().toBuffer()
 
-function simulationForm(file, name, extra = {}) {
+// `file` is the front view; the side profile defaults to a valid second photo.
+function simulationForm(file, name, extra = {}, profile = side) {
   const form = new FormData()
-  form.set('photo', new Blob([file], { type: 'image/jpeg' }), name)
+  form.set('front', new Blob([file], { type: 'image/jpeg' }), name)
+  if (profile) form.set('profile', new Blob([profile], { type: 'image/jpeg' }), 'profile.jpg')
   const fields = { procedure: 'rhinoplasty', focus: 'tip', intensity: '50', consentSelf: 'true', consentAdult: 'true', consentProcessing: 'true', ...extra }
   for (const [key, value] of Object.entries(fields)) if (value !== null) form.set(key, value)
   return form
@@ -106,6 +109,9 @@ async function simulate(form, headers = asUser) {
 check('upload without consent is refused', (await simulate(simulationForm(photo, 'a.jpg', { consentProcessing: null }))).status === 400)
 check('a file that is not an image is refused', (await simulate(simulationForm(Buffer.from('<html>not an image</html>'.repeat(40)), 'a.jpg'))).json?.error?.code === 'invalid_image')
 check('a photo that is too small is refused', (await simulate(simulationForm(tiny, 'a.jpg'))).json?.error?.code === 'invalid_image')
+check('a simulation without the side profile is refused', (await simulate(simulationForm(photo, 'a.jpg', {}, null))).json?.error?.code === 'missing_view')
+check('a profile that is not an image is refused', (await simulate(simulationForm(photo, 'a.jpg', {}, Buffer.from('<html>not an image</html>'.repeat(40))))).json?.error?.view === 'profile')
+check('the same photo for both views is refused', (await simulate(simulationForm(photo, 'a.jpg', {}, photo))).json?.error?.code === 'same_photo')
 check('a Pro procedure is refused on Starter', (await simulate(simulationForm(photo, 'a.jpg', { procedure: 'facelift', focus: 'lower' }))).json?.error?.code === 'plan_required')
 check('a cross-site request is refused', (await simulate(simulationForm(photo, 'a.jpg'), { cookie: userCookie ?? '', origin: 'https://evil.example' })).status === 403)
 
@@ -119,6 +125,8 @@ if (generated.status === 503) {
   if (generated.json?.id) {
     const image = await fetch(`${base}/api/simulations/${generated.json.id}/image?type=result`, { headers: asUser })
     check('owner can open the result', image.status === 200 && image.headers.get('content-type') === 'image/jpeg')
+    const profileImage = await fetch(`${base}/api/simulations/${generated.json.id}/image?type=result&view=profile`, { headers: asUser })
+    check('owner can open the profile result', profileImage.status === 200 && profileImage.headers.get('content-type') === 'image/jpeg')
     const other = await submitForm('/login', { email: adminEmail, password: adminPassword })
     const foreign = await fetch(`${base}/api/simulations/${generated.json.id}/image?type=result`, { headers: { cookie: cookieFrom(other) ?? '' } })
     check('another account cannot open the result', foreign.status === 404)

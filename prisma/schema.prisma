@@ -96,6 +96,9 @@ model Simulation {
   status       SimulationStatus @default(PROCESSING)
   originalKey  String?
   resultKey    String?
+  /// Side-profile view. `originalKey` / `resultKey` hold the front view.
+  profileOriginalKey String?
+  profileResultKey   String?
   provider     String?
   errorCode    String?
   errorMessage String?
