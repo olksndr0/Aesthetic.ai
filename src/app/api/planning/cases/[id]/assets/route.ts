@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { MESH_KINDS, PROVENANCES, mat4Schema, meshMetaSchema, viewIdSchema } from '@/lib/anatomy/schema'
+import { MESH_KINDS, PROVENANCES, mat4Schema, meshMetaSchema } from '@/lib/anatomy/schema'
 import { db } from '@/lib/db'
 import { jsonError } from '@/lib/http'
-import { UploadError, prepareUpload } from '@/lib/images'
-import { MAX_ASSETS_PER_CASE, MAX_MESH_BYTES, assetKey, inspectMesh, ownedCase, photoQuality, removeAssetFiles } from '@/lib/planning'
+import { MAX_ASSETS_PER_CASE, MAX_MESH_BYTES, assetKey, inspectMesh, ownedCase } from '@/lib/planning'
 import { isResponse, parseJsonField, planningFailure, planningUser } from '@/lib/planning-http'
 import { storage } from '@/lib/storage'
-import { MAX_UPLOAD_BYTES } from '@/lib/upload-rules'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -36,33 +34,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   try {
-    const kind = z.enum([...MESH_KINDS, 'photo']).safeParse(form.get('kind'))
+    const kind = z.enum(MESH_KINDS).safeParse(form.get('kind'))
     if (!kind.success) return jsonError(400, 'invalid', 'Unknown kind of file.')
-
-    if (kind.data === 'photo') {
-      const view = viewIdSchema.safeParse(form.get('view'))
-      if (!view.success) return jsonError(400, 'invalid', 'Choose which view the photograph shows.')
-      if (file.size > MAX_UPLOAD_BYTES) return jsonError(413, 'too_large', 'The photo is larger than 12 MB.')
-      let photo: Awaited<ReturnType<typeof prepareUpload>>
-      try {
-        photo = await prepareUpload(Buffer.from(await file.arrayBuffer()))
-      } catch (error) {
-        return jsonError(400, 'invalid_image', error instanceof UploadError ? error.message : 'The photo could not be read.')
-      }
-      const quality = await photoQuality(photo.data)
-
-      // One photograph per view: a new one replaces the old.
-      const previous = await db.caseAsset.findMany({ where: { caseId: id, kind: 'photo', label: view.data } })
-      const created = await db.caseAsset.create({
-        data: { caseId: id, kind: 'photo', provenance: 'acquired', label: view.data, key: '', bytes: photo.data.length, meta: { width: photo.width, height: photo.height, ...quality } },
-      })
-      const key = assetKey(user.id, id, created.id, 'jpg')
-      await storage().put(key, photo.data, 'image/jpeg')
-      await db.caseAsset.update({ where: { id: created.id }, data: { key } })
-      await removeAssetFiles(previous)
-      await db.caseAsset.deleteMany({ where: { id: { in: previous.map(item => item.id) } } })
-      return NextResponse.json({ id: created.id })
-    }
 
     if (file.size > MAX_MESH_BYTES) return jsonError(413, 'too_large', 'The model is too large after conversion. Reduce its resolution.')
     const provenance = z.enum(PROVENANCES).safeParse(form.get('provenance'))

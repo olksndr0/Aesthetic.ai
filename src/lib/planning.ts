@@ -139,9 +139,3 @@ export async function photoQuality(jpeg: Buffer) {
   if (mean > 220) flags.push('overexposed')
   return { sharpness, brightness: mean, flags, hash: createHash('sha256').update(jpeg).digest('hex').slice(0, 32) }
 }
-
-/** The photographs of a case as the workspace shows them. */
-export async function photoRecords(caseId: string) {
-  const photos = await db.caseAsset.findMany({ where: { caseId, kind: 'photo' }, orderBy: { createdAt: 'asc' } })
-  return photos.map(photo => ({ id: photo.id, view: photo.label, meta: photo.meta }))
-}

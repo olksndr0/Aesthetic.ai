@@ -22,6 +22,8 @@ type Props = {
   onDraft: (draft: DraftOperation[]) => void
   implantAssets: MeshAsset[]
   ready: boolean
+  /** Whether a facial surface is loaded; without one only the bone change is shown. */
+  hasFace: boolean
   /** Why the plan cannot run yet, in words. Empty when it can. */
   issues: string[]
   running: boolean
@@ -46,7 +48,7 @@ const SIDES: Array<{ value: string; label: string; normal: Vec3 }> = [
 ]
 const sideOf = (normal: readonly number[]) => SIDES.find(side => side.normal.every((value, index) => value === normal[index]))?.value ?? 'custom'
 
-export function PlanPanel({ draft, onDraft, implantAssets, ready, issues, running, onRun, stats, maxSkinMm, stale, requestPick, picking }: Props) {
+export function PlanPanel({ draft, onDraft, implantAssets, ready, hasFace, issues, running, onRun, stats, maxSkinMm, stale, requestPick, picking }: Props) {
   const update = (index: number, patch: Partial<DraftOperation>) => onDraft(draft.map((operation, at) => (at === index ? ({ ...operation, ...patch } as DraftOperation) : operation)))
 
   const pickPoint = (layer: 'skull' | 'face', hint: string, apply: (point: Vec3) => void) =>
@@ -79,7 +81,8 @@ export function PlanPanel({ draft, onDraft, implantAssets, ready, issues, runnin
         title="Operations"
         hint="Every value is entered by you. Nothing here is a surgical recommendation and no value is suggested. Positions are in mm in the anatomical frame (left / superior / anterior)."
       >
-        {!ready && <Notice>The 3D engine needs both a skull and a facial surface: the change is defined on bone and its effect is shown on skin.</Notice>}
+        {!ready && <Notice>The 3D engine needs a skull: every change is defined on bone.</Notice>}
+        {ready && !hasFace && <Notice>No facial surface is loaded, so the simulation shows the change on the bone only. Add a skin surface in the Data tab to see its effect on the face.</Notice>}
         {draft.map((operation, index) => (
           <div key={operation.id} className="space-y-4 rounded-xl border border-line p-4">
             <div className="flex items-center justify-between gap-3">
@@ -205,7 +208,7 @@ export function PlanPanel({ draft, onDraft, implantAssets, ready, issues, runnin
                 return (
                   <div className="space-y-2">
                     <p className="font-mono text-xs text-ash">
-                      Hard-tissue change up to {mm(result.maxHardMm)} · skin displacement up to {mm(result.maxSkinMm)} · {result.boneVertices.toLocaleString('en-GB')} bone vertices involved
+                      Hard-tissue change up to {mm(result.maxHardMm)}{hasFace ? ` · skin displacement up to ${mm(result.maxSkinMm)}` : ''} · {result.boneVertices.toLocaleString('en-GB')} bone vertices involved
                     </p>
                     {result.warnings.map(warning => (
                       <Notice key={warning} tone="warning">
@@ -260,7 +263,7 @@ export function PlanPanel({ draft, onDraft, implantAssets, ready, issues, runnin
         </button>
         {maxSkinMm !== null && !stale && (
           <p role="status" className="text-sm text-fog">
-            Simulated. Largest skin displacement: <span className="font-mono text-white">{mm(maxSkinMm)}</span>. The viewer shows the &ldquo;after&rdquo; state; changed skin is tinted.
+            Simulated.{hasFace ? <> Largest skin displacement: <span className="font-mono text-white">{mm(maxSkinMm)}</span>.</> : ''} The viewer shows the &ldquo;after&rdquo; state{hasFace ? '; changed skin is tinted' : ''}.
           </p>
         )}
         {stale && maxSkinMm !== null && <p className="text-sm text-fog">The plan or the geometry changed since the last run.</p>}

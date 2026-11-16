@@ -5,6 +5,7 @@ import { Hero } from '@/components/hero'
 import { HowItWorks } from '@/components/how-it-works'
 import { PricingTable } from '@/components/pricing-table'
 import { ProcedureCard } from '@/components/procedure-card'
+import { SkullShowcase } from '@/components/skull-showcase'
 import { Reveal } from '@/components/reveal'
 import { Trust } from '@/components/trust'
 import { getCurrentUser } from '@/lib/auth'
@@ -24,6 +25,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       )}
 
       <Hero title={content['hero.title']} subtitle={content['hero.subtitle']} />
+
+      <SkullShowcase />
 
       <section aria-labelledby="simulator-title" className="section">
         <div className="wrap grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:items-center lg:gap-16">

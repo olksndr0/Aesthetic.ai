@@ -1,6 +1,6 @@
 # Aesthetic AI
 
-AI simulation of aesthetic surgery on the user's own photos: every simulation takes a front view and a side profile and returns a before/after for both. Next.js 15 (App Router), React 19, TypeScript strict, Tailwind CSS, Prisma + PostgreSQL, Stripe subscriptions, an image-to-image AI provider (OpenAI or Replicate), private image storage, React Three Fiber, GSAP and Framer Motion.
+AI simulation of aesthetic and maxillofacial surgery. A person has a **profile** (clinical record and photographs of every view); the photo simulator edits the profile's front and side photographs, and the 3D planning module simulates an implant or a bone movement on a 3D skull. Next.js 15 (App Router), React 19, TypeScript strict, Tailwind CSS, Prisma + PostgreSQL, Stripe subscriptions, an image-to-image AI provider (Gemini, OpenAI or Replicate), private storage, Three.js, GSAP and Framer Motion.
 
 > Simulations are illustrative only. The product is not a medical device and its copy says so on every result.
 
@@ -31,12 +31,16 @@ Without any external key the site runs fully except for three things, each of wh
 | Payments | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Checkout answers "not configured"; nothing is charged or activated |
 | Email | `RESEND_API_KEY` | In development the email (e.g. the password-reset link) is printed in the server console |
 
+### Development access (remove before launch)
+
+While the site is being developed, the login page has a **Dev access** button: it signs in to a sample account without email or password, with two fully filled example profiles, placeholder photographs of all 14 views and an example 3D case on the skull mannequin. The account has no limit on profiles and 999 credits. The button exists outside production builds, or in a production build when `DEV_ACCESS="true"`; set `DEV_ACCESS="false"` to switch it off. Code: `src/lib/dev-access.ts`.
+
 ## 2. AI provider
 
 Set one key in `.env` and restart. `AI_PROVIDER` is optional; it is detected from the key.
 
 - **OpenAI** (`OPENAI_API_KEY`): `POST /v1/images/edits` with `gpt-image-1` and `input_fidelity=high`, which keeps the face of the input photo. Your OpenAI organisation may need to be verified for image models.
-- **Gemini** (`GEMINI_API_KEY`, model in `GEMINI_IMAGE_MODEL`): Google's image models ("Nano Banana") through `generateContent`. Used automatically when it is the only key set, or with `AI_PROVIDER="gemini"`. The same key powers the photographic render of the 3D planning module (section 6).
+- **Gemini** (`GEMINI_API_KEY`, model in `GEMINI_IMAGE_MODEL`): Google's image models ("Nano Banana") through `generateContent`. Used automatically when it is the only key set, or with `AI_PROVIDER="gemini"`. The same key powers the photographic render of the 3D planning module (section 7).
 - **Replicate** (`REPLICATE_API_TOKEN`): `black-forest-labs/flux-kontext-pro`, an instruction-driven edit model. Change `REPLICATE_MODEL` to use another Kontext variant.
 
 Every simulation needs two photos, the front view and the side profile, and makes one edit per view with the same procedure, focus and intensity (two provider calls, one credit). Nothing is stored or charged unless both succeed. The two edits are independent: what keeps them consistent is the shared instruction, so compare the two views when you evaluate a provider. Nothing checks that a photo really is a front or a profile shot.
@@ -86,10 +90,18 @@ src/app/api/planning        cases, private anatomical files, results, photograph
 src/app/api/stripe          checkout, customer portal, webhook
 src/app/actions             server actions: auth, account, contact, admin
 src/app/admin               protected admin panel
-src/components/three        procedural 3D head (no model file)
+src/components/three        skull mannequin stage; src/components/skull-showcase.tsx is the scroll-driven slideshow
+src/lib/profile             clinical record definition and example data
+src/lib/surgery             operations catalogue and preliminary indication
 ```
 
-## 6. 3D planning (`/planning`)
+## 6. Profiles, price lists and preliminary indication
+
+- **Profiles** (`/profiles`): each account keeps up to five people (`MAX_PROFILES`); development access is not limited. A profile holds the clinical record a surgeon may ask for, in 13 sections defined once in `src/lib/profile/fields.ts` (identity, body, vital signs, medical history, medication and allergies, lifestyle, occlusion, cephalometry, facial analysis, airway, imaging, laboratory, goals), and one photograph per view. The photo simulator and the photographic render of a 3D case take their photographs from the profile.
+- **Two price lists** (`/pricing`): the simulation service (the plans, editable at `/admin/plans`) and, separately, the indicative ranges of the operations in `src/lib/surgery/catalog.ts`: rhinoplasty, BSSO, Le Fort I, II and III, bimaxillary osteotomy, and patient-specific titanium implants. **The surgical ranges are placeholders for the clinic to replace.**
+- **Preliminary indication** (`src/lib/surgery/feasibility.ts`): for each operation, a draft set of transparent rules over the profile lists the missing data and the recorded facts a surgeon would review, with a rough score. It is the scaffold for the predictive model to be developed: not validated, not a probability, and it never states that an operation is or is not possible.
+
+## 7. 3D planning (`/planning`)
 
 A second module, for signed-in users: a measured 3D model of the skull and face is the geometric base, the operator defines an implant or a bone movement, the model is changed once, and every view of the result is rendered from that one state.
 
@@ -100,17 +112,17 @@ A second module, for signed-in users: a measured 3D model of the skull and face 
 | CT / CBCT series (DICOM) | Read **in the browser** (`src/lib/anatomy/dicom.ts`); the volume is never uploaded. Bone and skin surfaces are extracted at adjustable thresholds and stored. Scale and left/right come from the DICOM headers. Uncompressed, one file per slice; compressed transfer syntaxes and multi-frame objects are refused with an explanation. |
 | STL / OBJ / GLB | Skull, facial surface or implant. A mesh has no unit and no anatomical axes: the operator states them and whether the geometry is acquired or estimated. The server re-measures the model and refuses an implausible size. |
 | Landmarks | Picked on the model or imported (CSV/JSON) with unit, frame and origin. Bilateral landmarks give a left/right check that catches a mirrored model. |
-| Photographs | One per view, 14 views. Used for likeness in the photographic render only; never treated as 3D data. Flagged when blurred, badly exposed, duplicated or inconsistent. |
+| Photographs | Kept in the profile the case is linked to: one per view, 14 views. Used for likeness in the photographic render only; never treated as 3D data. Flagged when blurred, badly exposed, duplicated or inconsistent. |
 
 Everything is stored in one anatomical frame: millimetres, +X patient left, +Y superior, +Z anterior. Each model keeps its own file coordinates plus a 4x4 transform and the history of the steps that produced it (import, point-pair registration with its residual, manual corrections). A registration may rotate and move a model, never rescale or mirror it.
 
-**The engine** (`src/lib/anatomy/simulate.ts`) supports two procedures, each with its own hard-tissue step: an implant on bone (uploaded shape or an ellipsoid envelope) and the repositioning of a bone segment cut by a plane. Rhinoplasty and soft-tissue procedures are listed as not supported. The skin does not copy the bone: it takes the change of the bone beneath it, blended over a distance and scaled by a ratio. **Both values are entered by the operator; there is no default.** This is a geometric illustration, not a biomechanical or clinically validated prediction, and the interface says so on every result.
+**The engine** (`src/lib/anatomy/simulate.ts`) supports two procedures, each with its own hard-tissue step: an implant on bone (uploaded shape or an ellipsoid envelope) and the repositioning of a bone segment cut by a plane. Rhinoplasty and soft-tissue procedures are listed as not supported. With only a skull loaded (no facial surface) the simulation and the renders show the change on bone. The skin does not copy the bone: it takes the change of the bone beneath it, blended over a distance and scaled by a ratio. **Both values are entered by the operator; there is no default.** This is a geometric illustration, not a biomechanical or clinically validated prediction, and the interface says so on every result.
 
 **Photographic render (optional)**: set `GEMINI_API_KEY`. For each view the server sends Gemini the render of the simulated model, the photograph of that view, the front photograph and the text of the operations; nothing else leaves the server. It needs a separate consent and one credit. Each generated image is then compared with the outline of the 3D render inside the changed region (`src/lib/outline-check.ts`); beyond `GEOMETRY_TOLERANCE_MM` it is flagged and the geometric render stays the reference. The Gemini call has been exercised against a local stand-in only: **run it once with a real key and judge both likeness and the outline check before relying on it.** Check `GEMINI_IMAGE_MODEL` against Google's current model list.
 
 **Not included** (each needs a specialist component): a validated soft-tissue model (finite-element or trained on pre/post-operative scans); reconstruction of a skull from photographs or a single radiograph; automatic landmark detection, on the model or in generated photos; registration of photographs to the 3D model (camera pose); re-meshing of bone along an osteotomy; DICOM decompression; rhinoplasty and soft-tissue procedures.
 
-## 7. Checks
+## 8. Checks
 
 ```bash
 npm run typecheck     # TypeScript strict
@@ -119,9 +131,9 @@ npm run build         # production build
 node scripts/smoke.mjs   # end-to-end against a running server and a DEV database
 ```
 
-`scripts/smoke.mjs` registers a throwaway user and exercises pages, links, auth, upload validation, plan gating, cross-site refusal, admin protection, checkout, the 3D planning API (ownership, scale and alignment checks) and account deletion. The rate limiter is in memory, so restart the server between repeated runs.
+`scripts/smoke.mjs` registers a throwaway user and exercises pages, links, auth, upload validation, plan gating, cross-site refusal, admin protection, checkout, profiles (validation, photographs, limit, ownership), the 3D planning API (ownership, scale and alignment checks) and account deletion. The rate limiter is in memory, so restart the server between repeated runs.
 
-## 8. Deploy
+## 9. Deploy
 
 Any Node host works (Vercel, Railway, Render, Fly, a VPS).
 
@@ -133,8 +145,9 @@ Any Node host works (Vercel, Railway, Render, Fly, a VPS).
 6. Generation is a single request that can take up to a few minutes: on Vercel the route sets `maxDuration = 300`, which needs a plan that allows it.
 7. With more than one server instance, move the rate limiter and the generation queue to Redis.
 
-## 9. Known limits
+## 10. Known limits
 
 - The AI and Stripe paths need real keys to be exercised end to end (sections 2 and 3).
 - "Priority generation" (Premium) orders the in-process queue; it has an effect only when more generations are waiting than `AI_MAX_CONCURRENCY`.
-- The 3D head is generated procedurally and is deliberately abstract. To use a sculpted model, load a GLB in `src/components/three/face-scene.tsx`.
+- The skull shown on the site and in the example case is a generic mannequin built from a mathematical model (`npx tsx scripts/build-skull.mts` regenerates `public/models/skull.bin`, `assets/models/skull-mannequin.amsh` and its landmarks). It is not a scan of a person and is labelled as estimated geometry.
+- The surgical price ranges and the feasibility rules are placeholders (section 6).

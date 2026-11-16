@@ -44,6 +44,9 @@ model User {
   resetTokens PasswordResetToken[]
   simulations Simulation[]
   cases       PlanningCase[]
+  profiles    PatientProfile[]
+  /// Signed in through the development shortcut: example data, no limits. Never set in production.
+  devAccess   Boolean @default(false)
 
   @@index([planSlug])
 }
@@ -159,6 +162,9 @@ model PlanningCase {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   expiresAt         DateTime?
+  /// The person this case is about. Photographs for the photographic render come from this profile.
+  profileId         String?
+  profile           PatientProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   assets  CaseAsset[]
@@ -212,4 +218,41 @@ model CaseResult {
   files       CaseAsset[]
 
   @@index([caseId, createdAt])
+}
+
+/// One person's clinical record: the data a surgeon may ask for, and the
+/// photographs of every view. An account may keep several.
+model PatientProfile {
+  id        String   @id @default(cuid())
+  userId    String
+  label     String
+  /// Validated against the field definitions in src/lib/profile/fields.ts.
+  data      Json     @default("{}")
+  /// Created by development access as sample data.
+  example   Boolean  @default(false)
+  /// Consent to store and process health data and photographs.
+  consentAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  photos ProfilePhoto[]
+  cases  PlanningCase[]
+
+  @@index([userId, createdAt])
+}
+
+/// One photograph per view of a profile. Always private.
+model ProfilePhoto {
+  id        String   @id @default(cuid())
+  profileId String
+  /// A view id from src/lib/anatomy/views.ts.
+  view      String
+  key       String
+  bytes     Int
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+  profile   PatientProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, view])
 }

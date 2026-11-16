@@ -5,12 +5,11 @@ import { getCurrentUser } from '@/lib/auth'
 import { getPlan } from '@/lib/content'
 import { db } from '@/lib/db'
 import { jsonError, sameOrigin } from '@/lib/http'
-import { UploadError, finalizeResult, prepareUpload } from '@/lib/images'
+import { finalizeResult } from '@/lib/images'
 import { VIEWS, VIEW_LABELS, buildPrompt, getProcedure, type View } from '@/lib/procedures'
 import { rateLimit } from '@/lib/rate-limit'
 import { generationQueue, retentionDate } from '@/lib/simulations'
 import { storage } from '@/lib/storage'
-import { MAX_UPLOAD_BYTES } from '@/lib/upload-rules'
 import { simulationSchema } from '@/lib/validation'
 
 export const runtime = 'nodejs'
@@ -41,14 +40,11 @@ export async function POST(request: Request) {
     return jsonError(429, 'rate_limited', `Too many simulations. Try again in ${limit.retryAfterSeconds} seconds.`)
   }
 
-  const declared = Number(request.headers.get('content-length') ?? 0)
-  if (declared > VIEWS.length * MAX_UPLOAD_BYTES + 64 * 1024) return jsonError(413, 'too_large', 'Each photo can be up to 12 MB.')
-
   let form: FormData
   try {
     form = await request.formData()
   } catch {
-    return jsonError(400, 'bad_request', 'The upload could not be read.')
+    return jsonError(400, 'bad_request', 'The request could not be read.')
   }
 
   const parsed = simulationSchema.safeParse(Object.fromEntries([...form.entries()].filter(([, value]) => typeof value === 'string')))
@@ -67,24 +63,26 @@ export async function POST(request: Request) {
     return jsonError(403, 'plan_required', `${procedure.name} is available on Pro and Premium.`)
   }
 
-  // Both views are required: a procedure is judged from the front and in profile.
-  const photos = {} as Record<View, Awaited<ReturnType<typeof prepareUpload>>>
-  for (const view of VIEWS) {
-    const label = VIEW_LABELS[view].toLowerCase()
-    const file = form.get(view)
-    if (!(file instanceof File) || file.size === 0) {
-      return jsonError(400, 'missing_view', `Attach the ${label} photo. Both the front view and the side profile are required.`, { view })
-    }
-    if (file.size > MAX_UPLOAD_BYTES) return jsonError(413, 'too_large', `The ${label} photo is larger than 12 MB.`, { view })
-    try {
-      photos[view] = await prepareUpload(Buffer.from(await file.arrayBuffer()))
-    } catch (error) {
-      const reason = error instanceof UploadError ? error.message : 'The photo could not be read.'
-      return jsonError(400, 'invalid_image', `${VIEW_LABELS[view]}: ${reason}`, { view })
-    }
+  // The photographs come from the person's profile: the front view and one side profile are required.
+  const profileId = typeof form.get('profileId') === 'string' ? String(form.get('profileId')) : ''
+  const profile = profileId ? await db.patientProfile.findFirst({ where: { id: profileId, userId: user.id }, include: { photos: true } }) : null
+  if (!profile) return jsonError(400, 'no_profile', 'Choose the profile whose photographs the simulation uses.')
+  const stored: Record<View, { key: string } | undefined> = {
+    front: profile.photos.find(photo => photo.view === 'front'),
+    profile: profile.photos.find(photo => photo.view === 'profile-left') ?? profile.photos.find(photo => photo.view === 'profile-right'),
   }
-  if (photos.front.data.equals(photos.profile.data)) {
-    return jsonError(400, 'same_photo', 'The front view and the side profile are the same file. Upload two different photos.')
+  const photos = {} as Record<View, { data: Buffer }>
+  for (const view of VIEWS) {
+    const photo = stored[view]
+    if (!photo) {
+      return jsonError(400, 'missing_view', `The profile "${profile.label}" has no ${VIEW_LABELS[view].toLowerCase()} photograph. Add it to the profile first.`, { view })
+    }
+    try {
+      // Stored photographs were validated and re-encoded when they were added to the profile.
+      photos[view] = { data: await storage().get(photo.key) }
+    } catch {
+      return jsonError(400, 'missing_view', `The ${VIEW_LABELS[view].toLowerCase()} photograph of the profile could not be read. Upload it again.`, { view })
+    }
   }
 
   // Checked before any credit is taken or any photo is stored.

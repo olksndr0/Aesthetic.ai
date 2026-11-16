@@ -11,6 +11,9 @@ export function SmoothScroll() {
     if (reduced || coarse) return
 
     const lenis = new Lenis({ duration: 1.05, smoothWheel: true })
+    // Scroll-driven sections use the same scroller to move the page.
+    const host = window as unknown as { lenis?: Lenis }
+    host.lenis = lenis
     let frame = requestAnimationFrame(function loop(time) {
       lenis.raf(time)
       frame = requestAnimationFrame(loop)
@@ -18,6 +21,7 @@ export function SmoothScroll() {
 
     return () => {
       cancelAnimationFrame(frame)
+      delete host.lenis
       lenis.destroy()
     }
   }, [])

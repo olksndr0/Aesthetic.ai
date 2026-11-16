@@ -16,7 +16,7 @@ export async function Header() {
     <header className="glass sticky top-0 z-40 border-x-0 border-t-0">
       <div className="wrap flex h-16 items-center justify-between gap-6">
         <Logo />
-        <nav aria-label="Main" className="hidden items-center gap-7 lg:flex">
+        <nav aria-label="Main" className="hidden items-center gap-5 lg:flex xl:gap-7">
           {NAV_LINKS.map(link => (
             <Link key={link.href} href={link.href} className="text-sm text-fog transition hover:text-white">
               {link.label}

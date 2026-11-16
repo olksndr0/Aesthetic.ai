@@ -410,15 +410,25 @@ export class AnatomyViewer {
     return { camera, mmPerPixel: (2 * distance * Math.tan((FOV_DEG * Math.PI) / 360)) / height }
   }
 
+  /** What a result shows: the face when there is one, otherwise the skull with its implants. */
+  private subject(): { layer: Layer; name: LayerName } | null {
+    const face = this.layers.get('face')
+    if (face) return { layer: face, name: 'face' }
+    const skull = this.layers.get('skull')
+    return skull ? { layer: skull, name: 'skull' } : null
+  }
+
   /**
-   * Renders the facial surface from a fixed camera. `lit` is the geometric
-   * render on a plain background; `outline` is the silhouette (white on
-   * black) used to check generated photographs.
+   * Renders the subject of the result from a fixed camera: the facial
+   * surface, or the skull (with implants, after) when no face is loaded.
+   * `lit` is the geometric render on a plain background; `outline` is the
+   * silhouette (white on black) used to check generated photographs.
    */
   async capture(view: ViewDefinition, options: { state: ModelState; width: number; height: number; mode: 'lit' | 'outline' }): Promise<{ blob: Blob; mmPerPixel: number } | null> {
-    const face = this.layers.get('face')
+    const subject = this.subject()
     const setup = this.captureCamera(view, options.width, options.height)
-    if (!face || !setup) return null
+    if (!subject || !setup) return null
+    const showImplants = subject.name === 'skull' && options.state === 'after'
 
     const saved = {
       state: this.state,
@@ -427,18 +437,23 @@ export class AnatomyViewer {
       pixelRatio: this.renderer.getPixelRatio(),
       size: this.renderer.getSize(new THREE.Vector2()),
       visible: new Map<THREE.Object3D, boolean>(),
-      opacity: face.object.material.opacity,
+      opacity: subject.layer.object.material.opacity,
+      transparent: subject.layer.object.material.transparent,
       override: this.scene.overrideMaterial,
     }
     const others: THREE.Object3D[] = [this.implants, this.markers, this.lines, ...[...this.layers.values()].map(layer => layer.object)]
     for (const object of others) saved.visible.set(object, object.visible)
+    const material = subject.layer.object.material
 
     try {
       this.state = options.state
       this.highlight = false
       this.applyState()
-      for (const object of others) object.visible = object === face.object
-      this.setFaceOpacity(1)
+      for (const object of others) object.visible = object === subject.layer.object || (object === this.implants && showImplants)
+      material.transparent = false
+      material.opacity = 1
+      material.depthWrite = true
+      material.needsUpdate = true
       this.scene.background = new THREE.Color(options.mode === 'outline' ? '#000000' : CAPTURE_BACKGROUND)
       this.scene.overrideMaterial = options.mode === 'outline' ? new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.DoubleSide }) : null
       this.renderer.setPixelRatio(1)
@@ -452,7 +467,10 @@ export class AnatomyViewer {
       this.scene.overrideMaterial = saved.override
       this.scene.background = saved.background
       for (const [object, visible] of saved.visible) object.visible = visible
-      this.setFaceOpacity(saved.opacity)
+      material.transparent = saved.transparent
+      material.opacity = saved.opacity
+      material.depthWrite = !saved.transparent
+      material.needsUpdate = true
       this.renderer.setPixelRatio(saved.pixelRatio)
       this.renderer.setSize(saved.size.x, saved.size.y, false)
       this.state = saved.state
@@ -462,25 +480,34 @@ export class AnatomyViewer {
     }
   }
 
-  /** Bounding box, in pixels of a capture, of the skin that moved by more than a tenth of a millimetre. */
+  /** Bounding box, in pixels of a capture, of what the simulation changed: moved skin, or moved bone and implants when no face is loaded. */
   changedRegion(view: ViewDefinition, width: number, height: number): { x: number; y: number; width: number; height: number } | null {
-    const face = this.layers.get('face')
+    const subject = this.subject()
     const setup = this.captureCamera(view, width, height)
-    if (!face?.after || !face.change || !setup) return null
+    if (!subject?.layer.after || !setup) return null
     let minX = Infinity
     let minY = Infinity
     let maxX = -Infinity
     let maxY = -Infinity
     const point = new THREE.Vector3()
-    for (let i = 0; i < face.change.length; i += 3) {
-      if (Math.hypot(face.change[i]!, face.change[i + 1]!, face.change[i + 2]!) < 0.1) continue
-      point.set(face.after[i]!, face.after[i + 1]!, face.after[i + 2]!).project(setup.camera)
-      const x = ((point.x + 1) / 2) * width
-      const y = ((1 - point.y) / 2) * height
-      minX = Math.min(minX, x)
-      maxX = Math.max(maxX, x)
-      minY = Math.min(minY, y)
-      maxY = Math.max(maxY, y)
+    const include = (x: number, y: number, z: number) => {
+      point.set(x, y, z).project(setup.camera)
+      const px = ((point.x + 1) / 2) * width
+      const py = ((1 - point.y) / 2) * height
+      minX = Math.min(minX, px)
+      maxX = Math.max(maxX, px)
+      minY = Math.min(minY, py)
+      maxY = Math.max(maxY, py)
+    }
+    const { before, after } = subject.layer
+    for (let i = 0; i < after.length; i += 3) {
+      if (Math.hypot(after[i]! - before[i]!, after[i + 1]! - before[i + 1]!, after[i + 2]! - before[i + 2]!) >= 0.1) include(after[i]!, after[i + 1]!, after[i + 2]!)
+    }
+    if (subject.name === 'skull') {
+      for (const child of this.implants.children) {
+        const positions = (child as THREE.Mesh).geometry.getAttribute('position')
+        for (let i = 0; i < positions.count; i += 1) include(positions.getX(i), positions.getY(i), positions.getZ(i))
+      }
     }
     if (minX === Infinity) return null
     return { x: Math.max(0, minX), y: Math.max(0, minY), width: Math.max(1, Math.min(width, maxX) - Math.max(0, minX)), height: Math.max(1, Math.min(height, maxY) - Math.max(0, minY)) }

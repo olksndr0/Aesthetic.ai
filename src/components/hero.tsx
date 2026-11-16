@@ -1,6 +1,6 @@
 import Link from 'next/link'
 
-import { FaceCanvas } from './three/face-canvas'
+import { SkullCanvas } from './three/skull-canvas'
 
 // The entrance is plain CSS (`.enter`), so the hero is readable without
 // JavaScript and rests in its final state under reduced motion.
@@ -11,15 +11,7 @@ export function Hero({ title, subtitle }: { title: string; subtitle: string }) {
     <section className="relative overflow-hidden border-b border-line">
       <div className="wrap relative grid min-h-[calc(100svh-4rem)] items-end py-10 lg:grid-cols-[1.05fr_1fr] lg:items-center lg:gap-8 lg:py-0">
         <div className="enter-fade absolute inset-x-0 top-0 h-[58svh] opacity-70 lg:relative lg:order-2 lg:h-[calc(100svh-4rem)] lg:opacity-100">
-          <FaceCanvas
-            mode="hero"
-            label="A 3D head made of light points. A vertical line sweeps across it and the side it has passed takes a refined shape."
-            className="h-full"
-          />
-          <div aria-hidden="true" className="pointer-events-none absolute inset-x-5 bottom-4 hidden justify-between lg:flex font-mono text-[10px] uppercase tracking-[0.22em] text-ash lg:inset-x-10 lg:bottom-10">
-            <span>Before</span>
-            <span className="text-white">AI Simulation</span>
-          </div>
+          <SkullCanvas pose={{ yaw: -24, pitch: 4, zoom: 1.18, lift: 0 }} sway={16} label="A 3D model of a human skull, turning slowly" className="h-full" />
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink to-transparent lg:hidden" />
         </div>
 

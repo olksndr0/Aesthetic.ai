@@ -9,7 +9,7 @@ import { BeforeAfter } from '../before-after'
 
 import { ApiError, assetUrl, messageOf, sendJson } from './api'
 import { Check, Notice, Section, mm } from './atoms'
-import type { OutlineReport, ResultRecord, Viewer } from './types'
+import type { CaseProfile, OutlineReport, ResultRecord, Viewer } from './types'
 
 type Props = {
   results: ResultRecord[]
@@ -21,7 +21,8 @@ type Props = {
   account: Viewer
   providerConsent: boolean
   onProviderConsent: () => Promise<void>
-  hasFrontPhoto: boolean
+  /** The person the case is about; the photographs for the photographic version are theirs. */
+  profile: CaseProfile | null
   disclaimer: string
 }
 
@@ -37,7 +38,7 @@ function CheckLine({ check }: { check: OutlineReport }) {
   return <p role={check.status === 'fail' ? 'alert' : undefined} className={`mt-3 text-xs leading-relaxed ${check.status === 'fail' ? 'text-white' : 'text-ash'}`}>{check.status === 'fail' ? '⚠ ' : ''}{text}</p>
 }
 
-function ResultCard({ result, account, providerConsent, onProviderConsent, hasFrontPhoto, disclaimer, onChange, onDelete }: Omit<Props, 'results' | 'canSave' | 'saving' | 'onSave' | 'onResults'> & { result: ResultRecord; onChange: (result: ResultRecord) => void; onDelete: () => void }) {
+function ResultCard({ result, account, providerConsent, onProviderConsent, profile, disclaimer, onChange, onDelete }: Omit<Props, 'results' | 'canSave' | 'saving' | 'onSave' | 'onResults'> & { result: ResultRecord; onChange: (result: ResultRecord) => void; onDelete: () => void }) {
   const [consent, setConsent] = useState(providerConsent)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<{ message: string; setup?: string } | null>(null)
@@ -65,6 +66,7 @@ function ResultCard({ result, account, providerConsent, onProviderConsent, hasFr
   }
 
   const hasPhotos = result.views.some(view => view.photo)
+  const hasFrontPhoto = Boolean(profile?.views.includes('front'))
 
   return (
     <article className="space-y-5 rounded-2xl border border-line p-4 sm:p-5">
@@ -75,7 +77,9 @@ function ResultCard({ result, account, providerConsent, onProviderConsent, hasFr
             <li key={operation.id}>{describeOperation(operation)}</li>
           ))}
         </ul>
-        <p className="mt-3 font-mono text-xs text-ash">Largest skin displacement {mm(result.stats.maxSkinMm)}</p>
+        <p className="mt-3 font-mono text-xs text-ash">
+          {result.stats.faceAssetId ? `Largest skin displacement ${mm(result.stats.maxSkinMm)}` : `Bone only (no facial surface): largest hard-tissue change ${mm(Math.max(0, ...result.stats.operations.map(operation => operation.maxHardMm)))}`}
+        </p>
       </header>
 
       <p className="rounded-xl border border-white/30 px-4 py-3 text-sm font-medium">{disclaimer}</p>
@@ -137,7 +141,7 @@ function ResultCard({ result, account, providerConsent, onProviderConsent, hasFr
         ) : (
           <>
             <p className="text-xs leading-relaxed text-ash">
-              Sends to the image provider (Google Gemini) only: the &ldquo;simulated&rdquo; renders above, the matching photograph and the front photograph, and the text of the operations. No scan, mesh, measurement table or name is sent. Costs one
+              Sends to the image provider (Google Gemini) only: the &ldquo;simulated&rdquo; renders above, the matching photograph and the front photograph from the profile, and the text of the operations. No scan, mesh, measurement table or name is sent. Costs one
               simulation credit ({account.credits} left); a failed run is refunded. A generated photo is checked against the 3D outline with a tolerance of {account.toleranceMm} mm.
             </p>
             {!providerConsent && (
@@ -145,7 +149,16 @@ function ResultCard({ result, account, providerConsent, onProviderConsent, hasFr
                 I agree that these renders and photographs are sent to the external image provider to produce the photographic version.
               </Check>
             )}
-            {!hasFrontPhoto && <Notice>Add the front photograph in the Data tab first: the image model needs it for likeness, skin and hair.</Notice>}
+            {!profile && <Notice>Link this case to a profile (above the tabs): the photographs of that profile are used for likeness, skin and hair.</Notice>}
+            {profile && !hasFrontPhoto && (
+              <Notice>
+                The profile &ldquo;{profile.label}&rdquo; has no front photograph yet.{' '}
+                <a href={`/profiles/${profile.id}`} className="link text-white">
+                  Add it to the profile
+                </a>
+                .
+              </Notice>
+            )}
             <button type="button" onClick={photographic} disabled={busy || !hasFrontPhoto || (!providerConsent && !consent) || account.credits < 1} className="btn-primary btn-sm min-h-[44px]">
               {busy ? 'Generating, 1 to 3 minutes…' : hasPhotos ? 'Generate again' : 'Generate the photographic version'}
             </button>

@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
-import type { CaseRecord, MeshAsset, PhotoAsset, ResultRecord } from '@/components/planning/types'
+import type { CaseRecord, MeshAsset, ResultRecord } from '@/components/planning/types'
 import { PlanningWorkspace } from '@/components/planning/workspace'
 import { planSchema } from '@/lib/anatomy/plan'
 import { landmarksSchema, mat4Schema, measuresSchema } from '@/lib/anatomy/schema'
@@ -21,10 +21,10 @@ export default async function PlanningCasePage({ params }: { params: Promise<{ i
   // Owner is part of the query: someone else's id is a 404.
   const found = await db.planningCase.findFirst({
     where: { id, userId: user.id },
-    include: { assets: { orderBy: { createdAt: 'asc' } }, results: { orderBy: { createdAt: 'desc' }, include: { files: { select: { id: true, label: true } } } } },
+    include: { profile: { include: { photos: { select: { view: true } } } }, assets: { orderBy: { createdAt: 'asc' } }, results: { orderBy: { createdAt: 'desc' }, include: { files: { select: { id: true, label: true } } } } },
   })
   if (!found) notFound()
-  const content = await getContent()
+  const [content, profiles] = await Promise.all([getContent(), db.patientProfile.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'asc' }, select: { id: true, label: true } })])
 
   const plan = planSchema.safeParse(found.plan)
   const record: CaseRecord = {
@@ -38,7 +38,7 @@ export default async function PlanningCasePage({ params }: { params: Promise<{ i
   const meshes = found.assets
     .filter(asset => asset.kind === 'skull' || asset.kind === 'face' || asset.kind === 'implant')
     .map(asset => ({ id: asset.id, kind: asset.kind, provenance: asset.provenance, label: asset.label, transform: mat4Schema.parse(asset.transform), meta: asset.meta }) as MeshAsset)
-  const photos = found.assets.filter(asset => asset.kind === 'photo').map(asset => ({ id: asset.id, view: asset.label, meta: asset.meta }) as PhotoAsset)
+  const profile = found.profile ? { id: found.profile.id, label: found.profile.label, views: found.profile.photos.map(photo => photo.view) } : null
   const results = found.results.map(
     result =>
       ({
@@ -66,7 +66,8 @@ export default async function PlanningCasePage({ params }: { params: Promise<{ i
         <PlanningWorkspace
           record={record}
           initialMeshes={meshes}
-          initialPhotos={photos}
+          profile={profile}
+          profiles={profiles}
           initialResults={results}
           account={{ credits: user.credits, retentionDays: env.retentionDays, photoConfigured: geminiConfigured(), toleranceMm: env.planning.toleranceMm }}
           disclaimer={content['planning.disclaimer']}

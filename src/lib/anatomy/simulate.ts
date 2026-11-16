@@ -317,7 +317,7 @@ export function simulate(context: SimulationContext, plan: Plan, implantShapes: 
     add(skin)
     let covered = 0
     for (let i = 0; i < hard.length; i += 3) if (hard[i] !== 0 || hard[i + 1] !== 0 || hard[i + 2] !== 0) covered += 1
-    if (covered > 0 && maxLength(skin) === 0 && operation.softTissue.ratio > 0 && warnings.length === 0) {
+    if (face.positions.length > 0 && covered > 0 && maxLength(skin) === 0 && operation.softTissue.ratio > 0 && warnings.length === 0) {
       warnings.push('No skin lies over this implant, so the face does not change. Check its position and the alignment of skull and face.')
     }
     operations.push({ id: operation.id, kind: 'implant', maxHardMm: maxLength(hard), maxSkinMm: maxLength(skin), boneVertices: covered, warnings })

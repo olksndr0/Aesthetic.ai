@@ -61,4 +61,7 @@ export type CaseRecord = {
   plan: Plan | null
 }
 
+/** The person a case is about, with the views that have a photograph. */
+export type CaseProfile = { id: string; label: string; views: string[] }
+
 export type Viewer = { credits: number; retentionDays: number; photoConfigured: boolean; toleranceMm: number }

@@ -13,6 +13,7 @@ import {
   verifyPassword,
 } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { devAccessEnabled, ensureDevUser } from '@/lib/dev-access'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { DEFAULT_PLANS } from '@/lib/plans'
@@ -67,6 +68,14 @@ export async function loginAction(_: FormState, form: FormData): Promise<FormSta
 
   await createSession(user.id)
   redirect(safeNext(form.get('next')))
+}
+
+/** Development shortcut: enters the sample account without credentials. Refused when the shortcut is off. */
+export async function devAccessAction(): Promise<void> {
+  if (!devAccessEnabled()) redirect('/login')
+  const user = await ensureDevUser()
+  await createSession(user.id)
+  redirect('/profiles')
 }
 
 export async function logoutAction(): Promise<void> {

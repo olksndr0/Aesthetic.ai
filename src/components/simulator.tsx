@@ -3,58 +3,29 @@
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import { PROCEDURES, VIEWS, VIEW_LABELS, getProcedure, isView, viewGuide, type Procedure, type View } from '@/lib/procedures'
-import { ACCEPTED_TYPES, MAX_UPLOAD_BYTES, MIN_SIDE_PX } from '@/lib/upload-rules'
+import { PROCEDURES, VIEWS, VIEW_LABELS, getProcedure, type Procedure, type View } from '@/lib/procedures'
 
 import { BeforeAfter } from './before-after'
 
 type Viewer = { isSignedIn: boolean; credits: number; hasAllProcedures: boolean }
-type Props = { viewer: Viewer; initialProcedure: string; disclaimer: string; retentionDays: number }
+/** A profile and the ids of the two photographs a simulation needs, when it has them. */
+export type SimulatorProfile = { id: string; label: string; photos: Record<View, string | null> }
+type Props = { viewer: Viewer; profiles: SimulatorProfile[]; initialProfile: string | null; initialProcedure: string; disclaimer: string; retentionDays: number }
 
 type Failure = { code: string; message: string; setup?: string; view?: string }
-type PerView<T> = Record<View, T>
 
-const EMPTY: PerView<null> = { front: null, profile: null }
 type Phase = { kind: 'compose' } | { kind: 'generating'; startedAt: number } | { kind: 'done'; id: string }
 
 const CONSENTS = [
-  { id: 'consentSelf', label: 'This is a photo of me, or I have the clear permission of the person shown.' },
+  { id: 'consentSelf', label: 'These are photos of me, or I have the clear permission of the person shown.' },
   { id: 'consentAdult', label: 'The person in the photo is 18 or older and is clothed.' },
   {
     id: 'consentProcessing',
-    label: 'I agree that this photo is processed to create my simulation, including by the AI image provider, as described in the Privacy Policy.',
+    label: 'I agree that these photos are processed to create my simulation, including by the AI image provider, as described in the Privacy Policy.',
   },
 ] as const
-
-function readDimensions(file: File): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file)
-    const image = new Image()
-    image.onload = () => {
-      URL.revokeObjectURL(url)
-      resolve({ width: image.naturalWidth, height: image.naturalHeight })
-    }
-    image.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('unreadable'))
-    }
-    image.src = url
-  })
-}
-
-async function checkFile(file: File): Promise<string | null> {
-  if (!(ACCEPTED_TYPES as readonly string[]).includes(file.type)) return 'Upload a JPEG, PNG or WebP photo.'
-  if (file.size > MAX_UPLOAD_BYTES) return 'The photo is larger than 12 MB.'
-  try {
-    const { width, height } = await readDimensions(file)
-    if (Math.min(width, height) < MIN_SIDE_PX) return `The photo is too small. The shorter side must be at least ${MIN_SIDE_PX} px.`
-  } catch {
-    return 'The photo could not be read. Try another file.'
-  }
-  return null
-}
 
 // The selected state is one shape that travels between the options.
 const GLIDE = { type: 'spring', stiffness: 420, damping: 36, mass: 0.9 } as const
@@ -66,14 +37,13 @@ function intensityLabel(value: number): string {
   return 'Defined'
 }
 
-export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays }: Props) {
+export function Simulator({ viewer, profiles, initialProfile, initialProcedure, disclaimer, retentionDays }: Props) {
   const router = useRouter()
   const [procedure, setProcedure] = useState<Procedure>(() => getProcedure(initialProcedure) ?? PROCEDURES[0]!)
   const [focus, setFocus] = useState(procedure.focus[0]?.id ?? '')
   const [intensity, setIntensity] = useState(50)
-  const [files, setFiles] = useState<PerView<File | null>>(EMPTY)
-  const [previews, setPreviews] = useState<PerView<string | null>>(EMPTY)
-  const [fileErrors, setFileErrors] = useState<PerView<string | null>>(EMPTY)
+  const [profileId, setProfileId] = useState(() => (profiles.some(item => item.id === initialProfile) ? initialProfile! : (profiles[0]?.id ?? '')))
+  const profile = profiles.find(item => item.id === profileId) ?? null
   const [consents, setConsents] = useState<Record<string, boolean>>({})
   const [phase, setPhase] = useState<Phase>({ kind: 'compose' })
   const [failure, setFailure] = useState<Failure | null>(null)
@@ -82,7 +52,7 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
 
   const isLocked = !procedure.starter && !viewer.hasAllProcedures
   const hasConsent = CONSENTS.every(consent => consents[consent.id])
-  const missing = VIEWS.filter(view => !files[view])
+  const missing = VIEWS.filter(view => !profile?.photos[view])
   const hasBothPhotos = missing.length === 0
   const groups = useMemo(
     () => [
@@ -91,18 +61,6 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
     ],
     [],
   )
-
-  // Object URLs are released when a photo is replaced or the page is left.
-  const liveUrls = useRef(previews)
-  liveUrls.current = previews
-  useEffect(() => () => VIEWS.forEach(view => liveUrls.current[view] && URL.revokeObjectURL(liveUrls.current[view]!)), [])
-
-  function setPreview(view: View, url: string | null) {
-    setPreviews(current => {
-      if (current[view]) URL.revokeObjectURL(current[view]!)
-      return { ...current, [view]: url }
-    })
-  }
 
   useEffect(() => {
     if (phase.kind !== 'generating') return
@@ -117,46 +75,20 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
     window.history.replaceState(null, '', `/simulator?procedure=${next.slug}`)
   }
 
-  async function takeFile(view: View, next: File | undefined) {
-    if (!next) return
-    setFailure(null)
-    const other = files[view === 'front' ? 'profile' : 'front']
-    const problem =
-      other && other.name === next.name && other.size === next.size && other.lastModified === next.lastModified
-        ? 'This is the same file as the other view. Upload two different photos.'
-        : await checkFile(next)
-    if (problem) {
-      setFileErrors(current => ({ ...current, [view]: problem }))
-      return
-    }
-    setFileErrors(current => ({ ...current, [view]: null }))
-    setFiles(current => ({ ...current, [view]: next }))
-    setPreview(view, URL.createObjectURL(next))
-  }
-
-  function removeFile(view: View) {
-    setFiles(current => ({ ...current, [view]: null }))
-    setFileErrors(current => ({ ...current, [view]: null }))
-    setPreview(view, null)
-  }
-
   function reset() {
-    VIEWS.forEach(removeFile)
     setFailure(null)
     setConsents({})
     setPhase({ kind: 'compose' })
   }
 
   async function generate() {
-    const { front, profile } = files
-    if (!front || !profile || !hasConsent || isLocked) return
+    if (!profile || !hasBothPhotos || !hasConsent || isLocked) return
     setFailure(null)
     setElapsed(0)
     setPhase({ kind: 'generating', startedAt: Date.now() })
 
     const body = new FormData()
-    body.set('front', front)
-    body.set('profile', profile)
+    body.set('profileId', profile.id)
     body.set('procedure', procedure.slug)
     body.set('focus', focus)
     body.set('intensity', String(intensity))
@@ -172,13 +104,7 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
         router.refresh()
         return
       }
-      const error = json?.error ?? { code: 'unknown', message: 'The simulation could not be generated. Please try again.' }
-      setFailure(error)
-      // A photo the server refused goes back to its slot, so only that one is replaced.
-      if (isView(error.view) && (error.code === 'invalid_image' || error.code === 'missing_view' || error.code === 'too_large')) {
-        removeFile(error.view)
-        setFileErrors(current => ({ ...current, [error.view as View]: error.message }))
-      }
+      setFailure(json?.error ?? { code: 'unknown', message: 'The simulation could not be generated. Please try again.' })
     } catch {
       setFailure({ code: 'network', message: 'The connection was lost before the simulation finished. Check your network and try again.' })
     }
@@ -355,13 +281,13 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
                 Get more simulations
               </Link>
             ) : (
-              <button type="button" onClick={generate} disabled={!hasBothPhotos || !hasConsent || isGenerating} className="btn-primary w-full">
+              <button type="button" onClick={generate} disabled={!profile || !hasBothPhotos || !hasConsent || isGenerating} className="btn-primary w-full">
                 {isGenerating ? 'Generating…' : 'Generate My Result'}
               </button>
             )}
             <p className="text-center text-sm text-ash">
               {viewer.isSignedIn
-                ? `${credits} simulation${credits === 1 ? '' : 's'} left${missing.length === 2 ? ' · add your front and profile photos to start' : missing.length === 1 ? ` · add the ${VIEW_LABELS[missing[0]!].toLowerCase()} photo` : !hasConsent ? ' · confirm the three boxes' : ''}`
+                ? `${credits} simulation${credits === 1 ? '' : 's'} left${!profile ? ' · create a profile to start' : missing.length > 0 ? ` · the profile needs its ${missing.map(view => VIEW_LABELS[view].toLowerCase()).join(' and ')} photo` : !hasConsent ? ' · confirm the three boxes' : ''}`
                 : 'One free simulation with every new account.'}
             </p>
           </div>
@@ -396,14 +322,14 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
       {/* Photo and result */}
       <div className="order-1 lg:order-2">
         <div className="lg:sticky lg:top-24">
-          {phase.kind === 'done' && previews.front && previews.profile ? (
+          {phase.kind === 'done' ? (
             <motion.div initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, ease: EASE }}>
               <div className="grid gap-5 sm:grid-cols-2">
                 {VIEWS.map(view => (
                   <div key={view}>
                     <p className="eyebrow mb-3">{VIEW_LABELS[view]}</p>
                     <BeforeAfter
-                      beforeSrc={previews[view]!}
+                      beforeSrc={`/api/simulations/${phase.id}/image?type=original&view=${view}`}
                       afterSrc={`/api/simulations/${phase.id}/image?type=result&view=${view}`}
                       downloadHref={`/api/simulations/${phase.id}/image?type=result&view=${view}&download=1`}
                     />
@@ -416,7 +342,7 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
                   New simulation
                 </button>
                 <button type="button" onClick={() => deleteNow(phase.id)} className="btn-ghost btn-sm min-h-[44px]">
-                  Delete photos and results now
+                  Delete this simulation now
                 </button>
                 <Link href="/dashboard" className="btn-ghost btn-sm min-h-[44px]">
                   Open my history
@@ -425,21 +351,58 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
             </motion.div>
           ) : (
             <div>
-              <div className="grid grid-cols-2 gap-3 sm:gap-5">
-                {VIEWS.map(view => (
-                  <PhotoSlot
-                    key={view}
-                    view={view}
-                    guide={viewGuide(procedure.area, view)}
-                    preview={previews[view]}
-                    fileName={files[view]?.name ?? null}
-                    error={fileErrors[view]}
-                    isGenerating={isGenerating}
-                    onFile={file => void takeFile(view, file)}
-                    onRemove={() => removeFile(view)}
-                  />
-                ))}
-              </div>
+              {profiles.length > 0 && (
+                <label className="mb-4 block">
+                  <span className="mb-1.5 block text-sm text-fog">Profile whose photographs are used</span>
+                  <select className="field" value={profileId} disabled={isGenerating} onChange={event => setProfileId(event.target.value)}>
+                    {profiles.map(item => (
+                      <option key={item.id} value={item.id} className="bg-coal">
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {profile ? (
+                <div className="grid grid-cols-2 gap-3 sm:gap-5">
+                  {VIEWS.map(view => {
+                    const photoId = profile.photos[view]
+                    return (
+                      <div key={view} className="relative aspect-[4/5] overflow-hidden rounded-2xl border border-line bg-coal">
+                        {photoId ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={`/api/profiles/photos/${photoId}`} alt={`${VIEW_LABELS[view]} photograph of the profile`} className={`h-full w-full object-cover transition duration-700 ${isGenerating ? 'scale-[1.01] opacity-60' : ''}`} />
+                        ) : (
+                          <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+                            <p className="font-medium">{VIEW_LABELS[view]}</p>
+                            <p className="mt-2 text-sm leading-relaxed text-ash">Not in this profile yet.</p>
+                            <Link href={`/profiles/${profile.id}`} className="link mt-3 text-sm text-white">
+                              Add it to the profile
+                            </Link>
+                          </div>
+                        )}
+                        <span className="glass pointer-events-none absolute left-3 top-3 rounded-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em]">{VIEW_LABELS[view]}</span>
+                        {isGenerating && (
+                          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+                            <div className="scanline absolute inset-x-0 top-0 h-[10%] bg-gradient-to-b from-transparent via-white/25 to-transparent" />
+                            <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:32px_32px]" />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/20 bg-coal/50 p-8 text-center">
+                  <p className="text-lg font-medium">A simulation is made for a profile</p>
+                  <p className="mt-2 max-w-sm text-sm leading-relaxed text-ash">
+                    The profile holds the person&rsquo;s photographs (front and both profiles at least) and clinical record. The simulator uses those photographs.
+                  </p>
+                  <Link href={viewer.isSignedIn ? '/profiles' : `/register?next=${encodeURIComponent('/profiles')}`} className="btn-primary btn-sm mt-5 min-h-[44px]">
+                    {viewer.isSignedIn ? 'Create a profile' : 'Create a free account'}
+                  </Link>
+                </div>
+              )}
               {isGenerating ? (
                 <div role="status" aria-live="polite" className="mt-4 flex items-center justify-between gap-4 text-sm">
                   <span>
@@ -448,9 +411,15 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
                   <span className="shrink-0 font-mono text-ash">{elapsed}s</span>
                 </div>
               ) : (
-                <p className="mt-4 text-sm leading-relaxed text-ash">
-                  Both photos are required: the same change is simulated from the front and in profile. {procedure.photoGuide} JPEG, PNG or WebP, up to 12 MB each.
-                </p>
+                profile && (
+                  <p className="mt-4 text-sm leading-relaxed text-ash">
+                    The same change is simulated from the front and in profile, on the photographs stored in the profile. {procedure.photoGuide}{' '}
+                    <Link href={`/profiles/${profile.id}`} className="link text-white">
+                      Manage the photographs
+                    </Link>
+                    .
+                  </p>
+                )
               )}
             </div>
           )}
@@ -458,105 +427,5 @@ export function Simulator({ viewer, initialProcedure, disclaimer, retentionDays 
       </div>
     </div>
     </MotionConfig>
-  )
-}
-
-type PhotoSlotProps = {
-  view: View
-  guide: string
-  preview: string | null
-  fileName: string | null
-  error: string | null
-  isGenerating: boolean
-  onFile: (file: File | undefined) => void
-  onRemove: () => void
-}
-
-function ViewGlyph({ view }: { view: View }) {
-  return (
-    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {view === 'front' ? (
-        <>
-          <path d="M13 3.5c-4 0-6.5 2.8-6.5 7 0 5 3 9.5 6.5 9.5s6.5-4.5 6.5-9.500c0-4.2-2.5-7-6.5-7Z" />
-          <path d="M10 11h.01M16 11h.01M11 16c1.2.7 2.8.7 4 0" />
-        </>
-      ) : (
-        <path d="M16.5 3.500c-5.5-.5-9 3-9 7.500l-2 3.8 2 .700v2.300c0 1 .8 1.7 1.8 1.500l2.2-.300V22.500M16.5 3.500c2.5.8 4 3.3 4 6.3 0 3.2-1.5 5.2-2 7.200V22.5" />
-      )}
-    </svg>
-  )
-}
-
-function PhotoSlot({ view, guide, preview, fileName, error, isGenerating, onFile, onRemove }: PhotoSlotProps) {
-  const [isOver, setIsOver] = useState(false)
-  const id = `photo-${view}`
-  const label = VIEW_LABELS[view]
-
-  return (
-    <div>
-      {preview ? (
-        <motion.div initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5, ease: EASE }}>
-          <div className="relative aspect-[4/5] overflow-hidden rounded-2xl border border-line bg-coal">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview} alt={`Your ${label.toLowerCase()} photo`} className={`h-full w-full object-cover transition duration-700 ${isGenerating ? 'scale-[1.01] opacity-60' : ''}`} />
-            <span className="glass pointer-events-none absolute left-3 top-3 rounded-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em]">{label}</span>
-            {isGenerating && (
-              <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-                <div className="scanline absolute inset-x-0 top-0 h-[10%] bg-gradient-to-b from-transparent via-white/25 to-transparent" />
-                <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:32px_32px]" />
-              </div>
-            )}
-          </div>
-          {!isGenerating && (
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <p className="truncate text-sm text-ash">{fileName}</p>
-              <button type="button" onClick={onRemove} aria-label={`Remove the ${label.toLowerCase()} photo`} className="btn-ghost btn-sm min-h-[44px] shrink-0">
-                Remove
-              </button>
-            </div>
-          )}
-        </motion.div>
-      ) : (
-        <>
-          <label
-            htmlFor={id}
-            onDragOver={event => {
-              event.preventDefault()
-              setIsOver(true)
-            }}
-            onDragLeave={() => setIsOver(false)}
-            onDrop={event => {
-              event.preventDefault()
-              setIsOver(false)
-              onFile(event.dataTransfer.files[0])
-            }}
-            className={`flex aspect-[4/5] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-4 text-center transition duration-300 sm:p-6 ${isOver ? 'border-white bg-white/[0.07]' : 'border-white/20 bg-coal/50 hover:border-white/45 hover:bg-coal'}`}
-          >
-            <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20">
-              <ViewGlyph view={view} />
-            </span>
-            <span className="mt-4 font-medium sm:text-lg">{label}</span>
-            <span className="mt-2 max-w-[16rem] text-xs leading-relaxed text-ash sm:text-sm">{guide}</span>
-            <span className="mt-3 font-mono text-[10px] uppercase tracking-widest text-ash">Required</span>
-          </label>
-          <input
-            id={id}
-            type="file"
-            accept={ACCEPTED_TYPES.join(',')}
-            disabled={isGenerating}
-            onChange={event => {
-              onFile(event.target.files?.[0])
-              event.target.value = ''
-            }}
-            className="sr-only"
-          />
-        </>
-      )}
-      {error && (
-        <p role="alert" className="mt-3 text-sm">
-          {error}
-        </p>
-      )}
-    </div>
   )
 }

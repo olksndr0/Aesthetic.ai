@@ -16,13 +16,14 @@ const INPUTS = [
   ['CT or CBCT volume (DICOM)', 'Measured bone and skin in one acquisition. Read in your browser; only the extracted surfaces are uploaded.'],
   ['3D model (STL, OBJ, GLB)', 'A skull, a facial surface or an implant shape. You state its unit and axes; its size is checked.'],
   ['Landmarks and measurements', 'Craniometric points with coordinates, unit and origin, picked on the model or imported.'],
-  ['Photographs', 'Likeness, skin and hair for the photographic version. Not a 3D reconstruction, and never treated as one.'],
+  ['Photographs', 'Kept in the person\u2019s profile. Likeness, skin and hair for the photographic version; never treated as 3D data.'],
 ] as const
 
 export default async function PlanningPage() {
   const user = await requireUser('/planning')
-  const [content, cases] = await Promise.all([
+  const [content, profiles, cases] = await Promise.all([
     getContent(),
+    db.patientProfile.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'asc' }, select: { id: true, label: true } }),
     db.planningCase.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
@@ -42,7 +43,7 @@ export default async function PlanningPage() {
       </header>
 
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <CreateCase retentionDays={env.retentionDays} />
+        <CreateCase retentionDays={env.retentionDays} profiles={profiles} />
 
         <section aria-label="Your cases">
           <p className="eyebrow">Your cases</p>

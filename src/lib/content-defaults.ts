@@ -3,10 +3,10 @@
 export const CONTENT_DEFAULTS = {
   'hero.title': 'Discover Your Future Appearance.',
   'hero.subtitle':
-    'Experience the future of aesthetic surgery. Upload your photo, choose your procedure and visualize a personalized AI-generated simulation of your potential transformation.',
+    'Experience the future of aesthetic surgery. Build your profile, choose your procedure and visualize a personalized AI-generated simulation of your potential transformation.',
   'simulator.title': 'Visualize Your Transformation',
   'simulator.subtitle':
-    'Upload a front and a profile photo, pick a procedure and set how far the change goes. The AI edits your own photos and leaves everything else as it was.',
+    'Choose a profile, pick a procedure and set how far the change goes. The AI edits the photographs of that profile and leaves everything else as it was.',
   'how.title': 'How the simulation is made',
   'procedures.title': 'Twelve procedures, front and profile',
   'pricing.title': 'Plans for one simulation or thirty',

@@ -18,13 +18,14 @@ import { LandmarksPanel } from './landmarks-panel'
 import { PlanPanel, draftFromPlan, type DraftOperation } from './plan-panel'
 import { RegistrationPanel } from './registration-panel'
 import { ResultsPanel } from './results-panel'
-import type { CaseRecord, MeshAsset, PhotoAsset, ResultRecord, ResultStats, Viewer } from './types'
+import type { CaseProfile, CaseRecord, MeshAsset, ResultRecord, ResultStats, Viewer } from './types'
 import { AnatomyViewer, type Marker, type MeasureLine, type ModelState, type PickHit } from './viewer'
 
 type Props = {
   record: CaseRecord
   initialMeshes: MeshAsset[]
-  initialPhotos: PhotoAsset[]
+  profile: CaseProfile | null
+  profiles: Array<{ id: string; label: string }>
   initialResults: ResultRecord[]
   account: Viewer
   disclaimer: string
@@ -58,7 +59,10 @@ function planIssues(draft: DraftOperation[]): string[] {
   return issues
 }
 
-export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initialResults, account, disclaimer }: Props) {
+/** A case without a facial surface still simulates the bone: the skin layer is simply empty. */
+const NO_FACE: Mesh = { positions: new Float32Array(0), indices: new Uint32Array(0) }
+
+export function PlanningWorkspace({ record, initialMeshes, profile, profiles, initialResults, account, disclaimer }: Props) {
   const router = useRouter()
   const container = useRef<HTMLDivElement>(null)
   const viewer = useRef<AnatomyViewer | null>(null)
@@ -70,7 +74,6 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
   const [tab, setTab] = useState<Tab>(initialMeshes.length === 0 ? 'Data' : 'Plan')
   const [meshes, setMeshes] = useState(initialMeshes)
   const [raw, setRaw] = useState<Record<string, Mesh>>({})
-  const [photos, setPhotos] = useState(initialPhotos)
   const [results, setResults] = useState(initialResults)
   const [landmarks, setLandmarks] = useState<Landmark[]>(record.landmarks)
   const [measures, setMeasures] = useState<Measure[]>(record.measures)
@@ -204,7 +207,8 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
   const stale = simulation !== null && simulation.planKey !== planKey
 
   const runSimulation = useCallback(() => {
-    if (!skullMesh || !faceMesh) return
+    if (!skullMesh) return
+    const face = faceMesh ?? NO_FACE
     const parsed = planSchema.safeParse({ operations: draft, notes: '' })
     if (!parsed.success) return
     setRunning(true)
@@ -213,8 +217,8 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
     window.setTimeout(() => {
       try {
         const cached = contextCache.current
-        const context = cached && cached.skull === skullMesh && cached.face === faceMesh ? cached.context : prepareSimulation(skullMesh, faceMesh)
-        contextCache.current = { skull: skullMesh, face: faceMesh, context }
+        const context = cached && cached.skull === skullMesh && cached.face === face ? cached.context : prepareSimulation(skullMesh, face)
+        contextCache.current = { skull: skullMesh, face, context }
 
         const shapes = new Map<string, Mesh>()
         for (const operation of parsed.data.operations) {
@@ -234,7 +238,7 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
 
         const result = simulate(context, parsed.data, shapes)
         viewer.current?.setAfter('skull', result.skullAfter)
-        viewer.current?.setAfter('face', result.faceAfter, result.faceDisplacement)
+        if (faceMesh) viewer.current?.setAfter('face', result.faceAfter, result.faceDisplacement)
         viewer.current?.setImplants([...result.implants.values()])
         setSimulation({ result, context, plan: parsed.data, planKey })
         setModelState('after')
@@ -249,7 +253,7 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
   const saveResult = useCallback(
     async (includeThreeQuarter: boolean) => {
       const instance = viewer.current
-      if (!instance || !simulation || !skullAsset || !faceAsset || !afterLandmarks) return
+      if (!instance || !simulation || !skullAsset || !afterLandmarks) return
       setError(null)
       try {
         const form = new FormData()
@@ -277,8 +281,8 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
           landmarks: landmarks.map(item => ({ id: item.id, code: item.code, movedMm: Math.round((afterLandmarks.get(item.id)?.movedMm ?? 0) * 100) / 100 })),
           measures: measures.map(measure => ({ id: measure.id, label: measure.label, kind: measure.kind, before: measureValue(measure, before), after: measureValue(measure, after) })),
           skullAssetId: skullAsset.id,
-          faceAssetId: faceAsset.id,
-          usesEstimatedGeometry: skullAsset.provenance === 'estimated' || faceAsset.provenance === 'estimated',
+          faceAssetId: faceAsset?.id ?? '',
+          usesEstimatedGeometry: skullAsset.provenance === 'estimated' || faceAsset?.provenance === 'estimated',
         }
         form.set('plan', JSON.stringify(simulation.plan))
         form.set('stats', JSON.stringify(stats))
@@ -416,6 +420,41 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
       </div>
 
       <div className="min-w-0">
+        <label className="mb-5 block">
+          <span className="mb-1.5 block text-xs text-ash">
+            Profile this case is about
+            {profile ? (
+              <>
+                {' · '}
+                <a href={`/profiles/${profile.id}`} className="link text-white">
+                  open the record and photographs
+                </a>
+              </>
+            ) : null}
+          </span>
+          <select
+            className="field min-h-[44px] px-3 py-2 text-sm"
+            value={profile?.id ?? ''}
+            onChange={event => {
+              if (!event.target.value) return
+              sendJson('PATCH', `/api/planning/cases/${record.id}`, { profileId: event.target.value })
+                .then(() => router.refresh())
+                .catch(problem => setError(messageOf(problem)))
+            }}
+          >
+            {!profile && (
+              <option value="" className="bg-coal">
+                Not linked to a profile
+              </option>
+            )}
+            {profiles.map(item => (
+              <option key={item.id} value={item.id} className="bg-coal">
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div role="tablist" aria-label="Planning steps" className="flex flex-wrap gap-2">
           {TABS.map((name, index) => (
             <button key={name} type="button" role="tab" aria-selected={tab === name} onClick={() => setTab(name)} className={`pill min-h-[44px] ${tab === name ? 'border-transparent bg-white text-ink' : 'border-white/15 text-fog hover:border-white/40'}`}>
@@ -429,7 +468,6 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
             <DataPanel
               caseId={record.id}
               meshes={meshes}
-              photos={photos}
               onMeshAdded={(asset, mesh) => {
                 setRaw(current => ({ ...current, [asset.id]: mesh }))
                 setMeshes(current => [...current, asset])
@@ -440,7 +478,6 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
                 // Points picked on a model that no longer exists would float in space.
                 if (removed && removed.kind !== 'implant') setLandmarks(current => current.filter(item => item.layer !== removed.kind))
               }}
-              onPhotosChanged={setPhotos}
             />
           </div>
           <div hidden={tab !== 'Landmarks'}>
@@ -454,7 +491,8 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
               draft={draft}
               onDraft={setDraft}
               implantAssets={meshes.filter(mesh => mesh.kind === 'implant')}
-              ready={Boolean(skullMesh && faceMesh)}
+              ready={Boolean(skullMesh)}
+              hasFace={Boolean(faceMesh)}
               issues={issues}
               running={running}
               onRun={runSimulation}
@@ -482,7 +520,7 @@ export function PlanningWorkspace({ record, initialMeshes, initialPhotos, initia
                 await sendJson('PATCH', `/api/planning/cases/${record.id}`, { providerConsent: true })
                 setProviderConsent(true)
               }}
-              hasFrontPhoto={photos.some(photo => photo.view === 'front')}
+              profile={profile}
               disclaimer={disclaimer}
             />
           </div>

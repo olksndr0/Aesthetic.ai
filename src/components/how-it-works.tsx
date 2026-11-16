@@ -4,24 +4,24 @@ import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import { useEffect, useRef, useState } from 'react'
 
-import { FaceCanvas } from './three/face-canvas'
-import type { SceneMode } from './three/face-scene'
+import { SkullCanvas } from './three/skull-canvas'
+import type { StagePose } from './three/skull-stage'
 
-const STEPS: Array<{ title: string; body: string; mode: SceneMode }> = [
+const STEPS: Array<{ title: string; body: string; pose: StagePose }> = [
   {
-    title: 'Upload front and profile',
-    body: 'Two clear, evenly lit photos: one facing the camera and one from the side. Each is re-encoded, stripped of location data and stored privately under your account.',
-    mode: 'idle',
+    title: 'Build the profile',
+    body: 'The clinical record and the photographs of every view, front and both profiles at least. Each photo is re-encoded, stripped of location data and stored privately under your account.',
+    pose: { yaw: 0, pitch: 0, zoom: 1, lift: 0 },
   },
   {
     title: 'Choose the procedure',
     body: 'Pick one of twelve procedures, the area to focus on and how far the change goes, from subtle to clearly visible.',
-    mode: 'zones',
+    pose: { yaw: -40, pitch: 4, zoom: 1.45, lift: -0.12 },
   },
   {
     title: 'Compare before and after',
     body: 'The model edits only the treated area of your own photos. Drag the slider on the front view and on the profile, then download or delete the result.',
-    mode: 'sweep',
+    pose: { yaw: 88, pitch: 0, zoom: 1.05, lift: 0 },
   },
 ]
 
@@ -57,9 +57,9 @@ export function HowItWorks({ title }: { title: string }) {
           <h2 id="how-title" className="h2 mt-4 max-w-lg">
             {title}
           </h2>
-          <FaceCanvas
-            mode={STEPS[active]?.mode ?? 'idle'}
-            label="Stylised 3D head showing the area a procedure changes"
+          <SkullCanvas
+            pose={STEPS[active]?.pose ?? STEPS[0]!.pose}
+            label="A 3D skull that turns to the view each step describes"
             className="mt-6 h-[46vh] min-h-[320px] lg:h-[calc(100%-11rem)]"
           />
         </div>

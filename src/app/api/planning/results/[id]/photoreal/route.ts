@@ -64,9 +64,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const limit = rateLimit(`photoreal:${user.id}`, 6, 10 * 60_000)
   if (!limit.ok) return jsonError(429, 'rate_limited', `Too many renders. Try again in ${limit.retryAfterSeconds} seconds.`)
 
-  const photos = await db.caseAsset.findMany({ where: { caseId: result.caseId, kind: 'photo' } })
+  if (!result.case.profileId) return jsonError(400, 'no_profile', 'Link this case to a profile: its photographs are used for the photographic version.')
+  const photos = (await db.profilePhoto.findMany({ where: { profileId: result.case.profileId } })).map(photo => ({ label: photo.view, key: photo.key }))
   if (!photos.some(photo => photo.label === 'front')) {
-    return jsonError(400, 'no_photos', 'Upload at least the front photograph: the model needs it for identity, skin and hair.')
+    return jsonError(400, 'no_photos', 'Add at least the front photograph to the profile: the model needs it for identity, skin and hair.')
   }
   const views = z.array(renderViewSchema).parse(result.views)
   const operations = planSchema.parse(result.plan).operations.map(describeOperation)

@@ -17,6 +17,7 @@ const patchSchema = z
     measures: measuresSchema,
     plan: planSchema.nullable(),
     providerConsent: z.literal(true),
+    profileId: z.string().min(1).max(40),
   })
   .partial()
 
@@ -32,6 +33,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return jsonError(400, 'invalid', `${issue?.path.join('.') ?? 'Request'}: ${issue?.message ?? 'invalid'}`)
   }
   const { providerConsent, plan, ...rest } = parsed.data
+  if (rest.profileId && !(await db.patientProfile.findFirst({ where: { id: rest.profileId, userId: user.id } }))) return jsonError(400, 'invalid', 'Unknown profile.')
   await db.planningCase.update({
     where: { id },
     data: {

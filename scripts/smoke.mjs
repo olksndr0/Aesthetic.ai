@@ -87,17 +87,41 @@ check('wrong password does not sign in', cookieFrom(badLogin) === null)
 const goodLogin = await submitForm('/login', { email, password })
 check('login works', goodLogin.status === 303 && cookieFrom(goodLogin) !== null)
 
-// Uploads
+// Photographs used below
 const photo = await sharp({ create: { width: 900, height: 1100, channels: 3, background: { r: 180, g: 150, b: 130 } } }).jpeg().toBuffer()
 const side = await sharp({ create: { width: 900, height: 1100, channels: 3, background: { r: 150, g: 130, b: 120 } } }).jpeg().toBuffer()
 const tiny = await sharp({ create: { width: 200, height: 200, channels: 3, background: '#888' } }).jpeg().toBuffer()
 
-// `file` is the front view; the side profile defaults to a valid second photo.
-function simulationForm(file, name, extra = {}, profile = side) {
+// Profiles: the clinical record and the photographs every simulation uses
+const profileJson = (path, method, body, headers = asUser) =>
+  fetch(base + path, { method, headers: { ...headers, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }).then(async response => ({ status: response.status, json: await response.json().catch(() => null) }))
+check('profiles page sends signed-out visitors to login', (await fetch(base + '/profiles', { redirect: 'manual' })).status === 307)
+check('profile API is 401 when signed out', (await fetch(base + '/api/profiles', { method: 'POST', body: '{}' })).status === 401)
+check('a profile needs explicit consent', (await profileJson('/api/profiles', 'POST', { label: 'Smoke' })).status === 400)
+const createdProfile = await profileJson('/api/profiles', 'POST', { label: 'Smoke profile', consent: true })
+check('a profile is created with consent', createdProfile.status === 200 && Boolean(createdProfile.json?.id), JSON.stringify(createdProfile.json))
+const profileId = createdProfile.json?.id
+check('an out-of-range value is refused', (await profileJson(`/api/profiles/${profileId}`, 'PATCH', { data: { heightCm: 17 } })).status === 400)
+check('an unknown field is refused', (await profileJson(`/api/profiles/${profileId}`, 'PATCH', { data: { shoeSize: 42 } })).status === 400)
+check('a valid record is saved', (await profileJson(`/api/profiles/${profileId}`, 'PATCH', { data: { heightCm: 170, weightKg: 65, angleClass: 'Class I', anticoagulants: false } })).status === 200)
+
+async function addPhoto(view, file) {
   const form = new FormData()
-  form.set('front', new Blob([file], { type: 'image/jpeg' }), name)
-  if (profile) form.set('profile', new Blob([profile], { type: 'image/jpeg' }), 'profile.jpg')
-  const fields = { procedure: 'rhinoplasty', focus: 'tip', intensity: '50', consentSelf: 'true', consentAdult: 'true', consentProcessing: 'true', ...extra }
+  form.set('view', view)
+  form.set('file', new Blob([file], { type: 'image/jpeg' }), `${view}.jpg`)
+  const response = await fetch(`${base}/api/profiles/${profileId}/photos`, { method: 'POST', body: form, headers: asUser })
+  return { status: response.status, json: await response.json().catch(() => null) }
+}
+check('a file that is not an image is refused', (await addPhoto('front', Buffer.from('<html>not an image</html>'.repeat(40)))).json?.error?.code === 'invalid_image')
+check('a photo that is too small is refused', (await addPhoto('front', tiny)).json?.error?.code === 'invalid_image')
+check('an unknown view is refused', (await addPhoto('selfie', photo)).status === 400)
+const frontAdded = await addPhoto('front', photo)
+check('the front photograph is stored', frontAdded.status === 200 && frontAdded.json?.photos?.length === 1, JSON.stringify(frontAdded.json))
+const frontPhotoId = frontAdded.json?.photos?.[0]?.id
+
+function simulationForm(extra = {}) {
+  const form = new FormData()
+  const fields = { profileId, procedure: 'rhinoplasty', focus: 'tip', intensity: '50', consentSelf: 'true', consentAdult: 'true', consentProcessing: 'true', ...extra }
   for (const [key, value] of Object.entries(fields)) if (value !== null) form.set(key, value)
   return form
 }
@@ -106,16 +130,25 @@ async function simulate(form, headers = asUser) {
   return { status: response.status, json: await response.json().catch(() => null) }
 }
 
-check('upload without consent is refused', (await simulate(simulationForm(photo, 'a.jpg', { consentProcessing: null }))).status === 400)
-check('a file that is not an image is refused', (await simulate(simulationForm(Buffer.from('<html>not an image</html>'.repeat(40)), 'a.jpg'))).json?.error?.code === 'invalid_image')
-check('a photo that is too small is refused', (await simulate(simulationForm(tiny, 'a.jpg'))).json?.error?.code === 'invalid_image')
-check('a simulation without the side profile is refused', (await simulate(simulationForm(photo, 'a.jpg', {}, null))).json?.error?.code === 'missing_view')
-check('a profile that is not an image is refused', (await simulate(simulationForm(photo, 'a.jpg', {}, Buffer.from('<html>not an image</html>'.repeat(40))))).json?.error?.view === 'profile')
-check('the same photo for both views is refused', (await simulate(simulationForm(photo, 'a.jpg', {}, photo))).json?.error?.code === 'same_photo')
-check('a Pro procedure is refused on Starter', (await simulate(simulationForm(photo, 'a.jpg', { procedure: 'facelift', focus: 'lower' }))).json?.error?.code === 'plan_required')
-check('a cross-site request is refused', (await simulate(simulationForm(photo, 'a.jpg'), { cookie: userCookie ?? '', origin: 'https://evil.example' })).status === 403)
+check('a simulation without consent is refused', (await simulate(simulationForm({ consentProcessing: null }))).status === 400)
+check('a simulation without a profile is refused', (await simulate(simulationForm({ profileId: null }))).json?.error?.code === 'no_profile')
+check('a simulation needs the side profile in the profile', (await simulate(simulationForm())).json?.error?.view === 'profile')
+check('the side photograph is stored', (await addPhoto('profile-left', side)).json?.photos?.length === 2)
+check('a Pro procedure is refused on Starter', (await simulate(simulationForm({ procedure: 'facelift', focus: 'lower' }))).json?.error?.code === 'plan_required')
+check('a cross-site request is refused', (await simulate(simulationForm(), { cookie: userCookie ?? '', origin: 'https://evil.example' })).status === 403)
+if (frontPhotoId) {
+  check('the owner can open a profile photograph', (await fetch(`${base}/api/profiles/photos/${frontPhotoId}`, { headers: asUser })).status === 200)
+  check('a profile photograph is 401 when signed out', (await fetch(`${base}/api/profiles/photos/${frontPhotoId}`)).status === 401)
+  const outsider = await submitForm('/login', { email: adminEmail, password: adminPassword })
+  const asOutsider = { cookie: cookieFrom(outsider) ?? '', origin: base }
+  check('another account cannot open the photograph', (await fetch(`${base}/api/profiles/photos/${frontPhotoId}`, { headers: asOutsider })).status === 404)
+  check('another account cannot open the profile', (await fetch(`${base}/profiles/${profileId}`, { headers: asOutsider })).status === 404)
+  check('another account cannot use the profile in a simulation', (await simulate(simulationForm(), asOutsider)).json?.error?.code === 'no_profile')
+}
+for (let extra = 0; extra < 4; extra += 1) await profileJson('/api/profiles', 'POST', { label: `Extra ${extra}`, consent: true })
+check('a sixth profile is refused', (await profileJson('/api/profiles', 'POST', { label: 'One too many', consent: true })).status === 409)
 
-const generated = await simulate(simulationForm(photo, 'a.jpg'))
+const generated = await simulate(simulationForm())
 if (generated.status === 503) {
   check('without an AI key the simulator says so and generates nothing', generated.json?.error?.code === 'not_configured')
   const after = await (await fetch(base + '/dashboard', { headers: asUser })).text()

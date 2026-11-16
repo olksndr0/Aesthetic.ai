@@ -7,21 +7,16 @@ import { extractSurface, type Volume } from '@/lib/anatomy/isosurface'
 import { AXES, IDENTITY, UNITS, UNIT_TO_MM, orientationMatrix, type Axis, type Mat4, type Unit } from '@/lib/anatomy/math'
 import { bounds, encodeMesh, keepLargeComponents, transformPositions, type Mesh } from '@/lib/anatomy/mesh'
 import type { MeshKind, MeshMeta } from '@/lib/anatomy/schema'
-import { VIEW_DEFINITIONS } from '@/lib/anatomy/views'
-import { ACCEPTED_TYPES } from '@/lib/upload-rules'
-
-import { assetUrl, messageOf, sendForm, sendJson } from './api'
+import { messageOf, sendForm, sendJson } from './api'
 import { Check, Notice, Num, Section, Select, StatusBadge, Text } from './atoms'
 import { parseMeshFile, reduceForUse, sha256, type ParsedMeshFile } from './import'
-import type { Measured, MeshAsset, PhotoAsset } from './types'
+import type { Measured, MeshAsset } from './types'
 
 type Props = {
   caseId: string
   meshes: MeshAsset[]
-  photos: PhotoAsset[]
   onMeshAdded: (asset: MeshAsset, raw: Mesh) => void
   onMeshDeleted: (id: string) => void
-  onPhotosChanged: (photos: PhotoAsset[]) => void
 }
 
 const KIND_LABEL: Record<MeshKind, string> = { skull: 'Skull (bone)', face: 'Facial surface (skin)', implant: 'Implant' }
@@ -40,7 +35,7 @@ async function uploadMesh(caseId: string, kind: MeshKind, provenance: 'acquired'
   return { id: saved.id, kind, provenance, label, transform, meta: { ...meta, measured: saved.measured } }
 }
 
-export function DataPanel({ caseId, meshes, photos, onMeshAdded, onMeshDeleted, onPhotosChanged }: Props) {
+export function DataPanel({ caseId, meshes, onMeshAdded, onMeshDeleted }: Props) {
   const hasSkull = meshes.some(mesh => mesh.kind === 'skull')
   const hasFace = meshes.some(mesh => mesh.kind === 'face')
 
@@ -48,7 +43,7 @@ export function DataPanel({ caseId, meshes, photos, onMeshAdded, onMeshDeleted, 
     <div className="space-y-8">
       <Notice>
         A <strong className="text-white">skull</strong> is bone geometry from a CT or CBCT volume. A <strong className="text-white">facial surface</strong> is the skin only, from the same volume or from a surface scan.
-        Photographs, a list of measurements or a single 2D radiograph are not a 3D reconstruction of bone and are never treated as one here.
+        Photographs, a list of measurements or a single 2D radiograph are not a 3D reconstruction of bone and are never treated as one here. Photographs are kept in the person&rsquo;s profile, not in the case.
       </Notice>
 
       <DicomImport caseId={caseId} disabled={hasSkull && hasFace} hasSkull={hasSkull} hasFace={hasFace} onMeshAdded={onMeshAdded} />
@@ -61,7 +56,6 @@ export function DataPanel({ caseId, meshes, photos, onMeshAdded, onMeshDeleted, 
         ))}
       </Section>
 
-      <PhotoCoverage caseId={caseId} photos={photos} has3d={hasFace || hasSkull} onPhotosChanged={onPhotosChanged} />
     </div>
   )
 }
@@ -420,103 +414,6 @@ function ModelImport({ caseId, hasSkull, hasFace, onMeshAdded }: { caseId: strin
           {origin.trim().length < 3 && <p className="text-xs text-ash">State how the geometry was obtained to continue.</p>}
         </div>
       )}
-      {error && <Notice tone="warning">{error}</Notice>}
-    </Section>
-  )
-}
-
-const FLAG_TEXT: Record<string, string> = { blurry: 'Looks out of focus', dark: 'Too dark', overexposed: 'Overexposed' }
-
-function PhotoCoverage({ caseId, photos, has3d, onPhotosChanged }: { caseId: string; photos: PhotoAsset[]; has3d: boolean; onPhotosChanged: Props['onPhotosChanged'] }) {
-  const [busyView, setBusyView] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  async function upload(view: string, file: File | undefined) {
-    if (!file) return
-    setBusyView(view)
-    setError(null)
-    try {
-      const form = new FormData()
-      form.set('kind', 'photo')
-      form.set('view', view)
-      form.set('file', file)
-      await sendForm(`/api/planning/cases/${caseId}/assets`, form)
-      // Read the stored facts back (dimensions, sharpness) instead of trusting the browser.
-      const fresh = await fetch(`/api/planning/cases/${caseId}/photos`).then(response => response.json() as Promise<{ photos: PhotoAsset[] }>)
-      onPhotosChanged(fresh.photos)
-    } catch (problem) {
-      setError(messageOf(problem))
-    }
-    setBusyView(null)
-  }
-
-  async function remove(photo: PhotoAsset) {
-    try {
-      await sendJson('DELETE', `/api/planning/assets/${photo.id}`)
-      onPhotosChanged(photos.filter(item => item.id !== photo.id))
-    } catch (problem) {
-      setError(messageOf(problem))
-    }
-  }
-
-  // Inconsistencies across the set: the same picture twice, or one far brighter or darker than the rest.
-  const sorted = photos.map(photo => photo.meta.brightness).sort((a, b) => a - b)
-  const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)]! : 0
-  const issues = (photo: PhotoAsset): string[] => {
-    const list = photo.meta.flags.map(flag => FLAG_TEXT[flag] ?? flag)
-    const twin = photos.find(other => other.id !== photo.id && other.meta.hash === photo.meta.hash)
-    if (twin) list.push(`Same picture as "${VIEW_DEFINITIONS.find(view => view.id === twin.view)?.label ?? twin.view}"`)
-    if (photos.length >= 3 && Math.abs(photo.meta.brightness - median) > 60) list.push('Lighting differs from the other photos')
-    return list
-  }
-  const essential = ['front', 'profile-left', 'profile-right']
-  const missing = essential.filter(view => !photos.some(photo => photo.view === view))
-
-  return (
-    <Section
-      title="Photographs (appearance)"
-      hint={
-        has3d
-          ? 'The anatomical views of the skull and face are drawn from the 3D model: no separate picture or radiograph is needed for each angle. Photographs supply what a scan does not hold: skin, hair and likeness. The front and both profiles are used for the photographic render; the others are optional.'
-          : 'External photographs of each view. They document appearance; they are not a 3D reconstruction.'
-      }
-    >
-      {missing.length > 0 && (
-        <Notice>Missing for a photographic render: {missing.map(view => VIEW_DEFINITIONS.find(item => item.id === view)!.label.toLowerCase()).join(', ')}.</Notice>
-      )}
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {VIEW_DEFINITIONS.map(view => {
-          const photo = photos.find(item => item.view === view.id)
-          const problems = photo ? issues(photo) : []
-          return (
-            <li key={view.id} className="rounded-xl border border-line p-3">
-              <p className="text-sm font-medium">{view.label}</p>
-              {photo ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={assetUrl(photo.id)} alt={`${view.label} photograph`} className="mt-2 aspect-[4/5] w-full rounded-lg object-cover" />
-                  {problems.map(problem => (
-                    <p key={problem} role="alert" className="mt-2 text-xs text-white">
-                      ⚠ {problem}
-                    </p>
-                  ))}
-                  <button type="button" onClick={() => void remove(photo)} className="mt-2 min-h-[44px] text-xs text-fog underline underline-offset-4">
-                    Remove
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="mt-1 text-xs leading-relaxed text-ash">{view.photoGuide}</p>
-                  <label className="mt-2 inline-flex min-h-[44px] cursor-pointer items-center text-xs text-white underline underline-offset-4">
-                    {busyView === view.id ? 'Uploading…' : essential.includes(view.id) ? 'Add photo' : 'Add photo (optional)'}
-                    <input type="file" accept={ACCEPTED_TYPES.join(',')} className="sr-only" disabled={busyView !== null} onChange={event => void upload(view.id, event.target.files?.[0])} />
-                  </label>
-                </>
-              )}
-            </li>
-          )
-        })}
-      </ul>
       {error && <Notice tone="warning">{error}</Notice>}
     </Section>
   )
