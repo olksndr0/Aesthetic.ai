@@ -18,13 +18,26 @@ export const env = {
     return process.env.NODE_ENV === 'production'
   },
   ai: {
-    get provider(): 'openai' | 'replicate' | null {
+    get provider(): 'openai' | 'replicate' | 'gemini' | null {
       const chosen = str('AI_PROVIDER').toLowerCase()
       if (chosen === 'openai') return str('OPENAI_API_KEY') ? 'openai' : null
       if (chosen === 'replicate') return str('REPLICATE_API_TOKEN') ? 'replicate' : null
+      if (chosen === 'gemini') return str('GEMINI_API_KEY') ? 'gemini' : null
       if (str('OPENAI_API_KEY')) return 'openai'
       if (str('REPLICATE_API_TOKEN')) return 'replicate'
+      if (str('GEMINI_API_KEY')) return 'gemini'
       return null
+    },
+    // Gemini image models ("Nano Banana"). The key is read on the server only.
+    get geminiKey() {
+      return str('GEMINI_API_KEY')
+    },
+    get geminiModel() {
+      return str('GEMINI_IMAGE_MODEL', 'gemini-nano-banana-2.1')
+    },
+    /** Optional output size ("1K", "2K", "4K"); left to the model when empty. */
+    get geminiImageSize() {
+      return str('GEMINI_IMAGE_SIZE')
     },
     get openaiKey() {
       return str('OPENAI_API_KEY')
@@ -74,6 +87,13 @@ export const env = {
     },
     get secretAccessKey() {
       return str('S3_SECRET_ACCESS_KEY')
+    },
+  },
+  planning: {
+    /** Largest accepted deviation between a generated photo's outline and the 3D render, in mm. */
+    get toleranceMm() {
+      const value = Number.parseFloat(str('GEOMETRY_TOLERANCE_MM'))
+      return Number.isFinite(value) && value > 0 ? value : 2
     },
   },
   get retentionDays() {

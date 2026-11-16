@@ -43,6 +43,7 @@ model User {
   sessions    Session[]
   resetTokens PasswordResetToken[]
   simulations Simulation[]
+  cases       PlanningCase[]
 
   @@index([planSlug])
 }
@@ -141,4 +142,73 @@ model StripeEvent {
   id        String   @id
   type      String
   createdAt DateTime @default(now())
+}
+
+/// A 3D planning case: anatomical data, landmarks, an operator-defined plan and its results.
+model PlanningCase {
+  id                String    @id @default(cuid())
+  userId            String
+  title             String
+  /// Consent to store and process anatomical data and photographs.
+  consentAt         DateTime
+  /// Consent to send renders and photographs to the external image provider. Null until given.
+  providerConsentAt DateTime?
+  landmarks         Json      @default("[]")
+  measures          Json      @default("[]")
+  plan              Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  expiresAt         DateTime?
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  assets  CaseAsset[]
+  results CaseResult[]
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
+/// One stored file of a case. Geometry is kept in the file's own coordinates;
+/// `transform` (4x4, row-major) takes it to the canonical frame in millimetres.
+model CaseAsset {
+  id         String   @id @default(cuid())
+  caseId     String
+  /// skull | face | implant | photo | render
+  kind       String
+  /// acquired | estimated | derived
+  provenance String
+  /// Layer name, or the view id for photographs and renders.
+  label      String
+  key        String
+  bytes      Int
+  meta       Json     @default("{}")
+  transform  Json?
+  resultId   String?
+  createdAt  DateTime @default(now())
+  case       PlanningCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  result     CaseResult?  @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([resultId])
+}
+
+/// A simulation of one plan: geometric renders of every view from one model state,
+/// and optionally the photographic versions with their geometry check.
+model CaseResult {
+  id          String   @id @default(cuid())
+  caseId      String
+  plan        Json
+  engine      Json
+  stats       Json
+  /// Per view: scale, region of interest, photographic status and verification.
+  views       Json
+  /// none | processing | completed | failed
+  photoStatus String   @default("none")
+  photoError  String?
+  provider    String?
+  createdAt   DateTime @default(now())
+  case        PlanningCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  files       CaseAsset[]
+
+  @@index([caseId, createdAt])
 }

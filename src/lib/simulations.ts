@@ -2,6 +2,7 @@ import 'server-only'
 
 import { db } from './db'
 import { env } from './env'
+import { deleteAllUserCases, purgeExpiredCases } from './planning'
 import { createQueue } from './queue'
 import { storage } from './storage'
 
@@ -43,6 +44,7 @@ export async function deleteSimulation(id: string, userId: string): Promise<bool
 export async function deleteAllUserImages(userId: string): Promise<void> {
   const simulations = await db.simulation.findMany({ where: { userId }, select: IMAGE_KEY_SELECT })
   await removeFiles(simulations.flatMap(imageKeys))
+  await deleteAllUserCases(userId)
 }
 
 /** Removes images past the retention date. The row stays, without files, for statistics. */
@@ -57,7 +59,9 @@ export async function purgeExpired(now = new Date()): Promise<number> {
     await db.simulation.update({ where: { id: simulation.id }, data: NO_IMAGE_KEYS })
   }
 
+  const cases = await purgeExpiredCases(now)
+
   await db.session.deleteMany({ where: { expiresAt: { lte: now } } })
   await db.passwordResetToken.deleteMany({ where: { expiresAt: { lte: now } } })
-  return expired.length
+  return expired.length + cases
 }

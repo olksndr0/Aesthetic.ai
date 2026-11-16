@@ -1,17 +1,10 @@
 import 'server-only'
 
+import { AiError, type AiErrorCode } from './ai-error'
 import { env } from './env'
+import { geminiImage } from './gemini'
 
-export type AiErrorCode = 'not_configured' | 'content_rejected' | 'timeout' | 'provider_error'
-
-export class AiError extends Error {
-  constructor(
-    public code: AiErrorCode,
-    message: string,
-  ) {
-    super(message)
-  }
-}
+export { AiError, type AiErrorCode }
 
 export type GenerateInput = { image: Buffer; prompt: string; highResolution: boolean }
 export type GenerateOutput = { image: Buffer; provider: string }
@@ -26,7 +19,7 @@ export async function generateSimulation(input: GenerateInput): Promise<Generate
   if (provider === null) {
     throw new AiError(
       'not_configured',
-      'No AI image provider is configured. Set OPENAI_API_KEY or REPLICATE_API_TOKEN on the server.',
+      'No AI image provider is configured. Set OPENAI_API_KEY, REPLICATE_API_TOKEN or GEMINI_API_KEY on the server.',
     )
   }
 
@@ -34,7 +27,12 @@ export async function generateSimulation(input: GenerateInput): Promise<Generate
   const timer = setTimeout(() => controller.abort(), env.ai.timeoutMs)
 
   try {
-    const image = provider === 'openai' ? await openaiEdit(input, controller.signal) : await replicateEdit(input, controller.signal)
+    const image =
+      provider === 'openai'
+        ? await openaiEdit(input, controller.signal)
+        : provider === 'replicate'
+          ? await replicateEdit(input, controller.signal)
+          : await geminiImage([{ text: input.prompt }, { image: input.image, mimeType: 'image/jpeg' }], { signal: controller.signal })
     if (image.length < 1024) throw new AiError('provider_error', 'The provider returned an empty image.')
     return { image, provider }
   } catch (error) {
