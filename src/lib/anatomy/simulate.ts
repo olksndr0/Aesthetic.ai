@@ -110,6 +110,7 @@ function implantEnvelope(bone: Float32Array, boneGrid: PointGrid, boneNormals: F
   const reach = Math.max(2, 1.5 * meanEdge(implant))
   let outside = 0
   let floating = 0
+  let closest = Infinity
   const vertexCount = implant.positions.length / 3
   for (let v = 0; v < vertexCount; v += 1) {
     const x = implant.positions[v * 3]!
@@ -120,6 +121,7 @@ function implantEnvelope(bone: Float32Array, boneGrid: PointGrid, boneNormals: F
       floating += 1
       continue
     }
+    closest = Math.min(closest, hit.distance)
     const j = hit.index * 3
     const ox = x - bone[j]!
     const oy = y - bone[j + 1]!
@@ -137,6 +139,7 @@ function implantEnvelope(bone: Float32Array, boneGrid: PointGrid, boneNormals: F
     })
   }
   if (floating > vertexCount / 2) warnings.push('Most of the implant is more than 60 mm from any bone. Check its position.')
+  else if (closest > 2) warnings.push(`The implant does not touch the bone: its closest point is ${closest.toFixed(1)} mm away. Check its position.`)
   else if (outside === 0) warnings.push('The implant lies entirely inside the bone, so it does not change the outer shape. Check its position.')
   return field
 }
@@ -314,6 +317,9 @@ export function simulate(context: SimulationContext, plan: Plan, implantShapes: 
     add(skin)
     let covered = 0
     for (let i = 0; i < hard.length; i += 3) if (hard[i] !== 0 || hard[i + 1] !== 0 || hard[i + 2] !== 0) covered += 1
+    if (covered > 0 && maxLength(skin) === 0 && operation.softTissue.ratio > 0 && warnings.length === 0) {
+      warnings.push('No skin lies over this implant, so the face does not change. Check its position and the alignment of skull and face.')
+    }
     operations.push({ id: operation.id, kind: 'implant', maxHardMm: maxLength(hard), maxSkinMm: maxLength(skin), boneVertices: covered, warnings })
   }
 

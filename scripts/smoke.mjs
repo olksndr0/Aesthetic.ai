@@ -133,6 +133,63 @@ if (generated.status === 503) {
   }
 }
 
+// 3D planning: access control and geometry checks
+check('planning page sends signed-out visitors to login', (await fetch(base + '/planning', { redirect: 'manual' })).status === 307)
+check('planning API is 401 when signed out', (await fetch(base + '/api/planning/cases', { method: 'POST', body: '{}' })).status === 401)
+const planningJson = (path, method, body, headers = asUser) =>
+  fetch(base + path, { method, headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async response => ({ status: response.status, json: await response.json().catch(() => null) }))
+check('a case needs explicit consent', (await planningJson('/api/planning/cases', 'POST', { title: 'Smoke case' })).status === 400)
+const createdCase = await planningJson('/api/planning/cases', 'POST', { title: 'Smoke case', consent: true })
+check('a case is created with consent', createdCase.status === 200 && Boolean(createdCase.json?.id), JSON.stringify(createdCase.json))
+const caseId = createdCase.json?.id
+
+// A 100 mm tetrahedron in the storage format ("AMSH", version, counts, positions, indices).
+function meshFile(size) {
+  const bytes = new Uint8Array(16 + 4 * 12 + 4 * 12)
+  const view = new DataView(bytes.buffer)
+  view.setUint32(0, 0x48534d41, true)
+  view.setUint32(4, 1, true)
+  view.setUint32(8, 4, true)
+  view.setUint32(12, 4, true)
+  ;[0, 0, 0, size, 0, 0, 0, size, 0, 0, 0, size].forEach((value, index) => view.setFloat32(16 + index * 4, value, true))
+  ;[0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].forEach((value, index) => view.setUint32(64 + index * 4, value, true))
+  return bytes
+}
+const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+function meshForm(bytes, transform = identity) {
+  const form = new FormData()
+  form.set('kind', 'skull')
+  form.set('provenance', 'acquired')
+  form.set('label', 'Smoke skull')
+  form.set('transform', JSON.stringify(transform))
+  form.set('meta', JSON.stringify({ fileName: 'smoke.stl', format: 'stl', sourceHash: 'smoke', unit: 'mm', origin: 'smoke test', resampledMm: null, steps: [{ kind: 'import', note: 'smoke', rmsMm: null, at: new Date().toISOString() }] }))
+  form.set('file', new Blob([bytes]), 'model.amsh')
+  return form
+}
+const uploadMesh = form => fetch(`${base}/api/planning/cases/${caseId}/assets`, { method: 'POST', body: form, headers: asUser }).then(async response => ({ status: response.status, json: await response.json().catch(() => null) }))
+check('a model in the wrong unit is refused on scale', (await uploadMesh(meshForm(meshFile(0.1)))).json?.error?.code === 'implausible_scale')
+check('a damaged model file is refused', (await uploadMesh(meshForm(meshFile(100).slice(0, 60)))).json?.error?.code === 'invalid_mesh')
+const storedMesh = await uploadMesh(meshForm(meshFile(100)))
+check('a plausible model is stored and measured by the server', storedMesh.status === 200 && storedMesh.json?.measured?.sizeMm?.[0] === 100, JSON.stringify(storedMesh.json))
+check('a second skull is refused', (await uploadMesh(meshForm(meshFile(100)))).status === 409)
+if (storedMesh.json?.id) {
+  const assetPath = `/api/planning/assets/${storedMesh.json.id}`
+  check('the owner can download the model', (await fetch(base + assetPath, { headers: asUser })).status === 200)
+  check('the model is 401 when signed out', (await fetch(base + assetPath)).status === 401)
+  const step = { kind: 'manual', note: 'smoke', rmsMm: null, at: new Date().toISOString() }
+  check('an alignment may not rescale a model', (await planningJson(assetPath, 'PATCH', { transform: identity.map((value, index) => (index % 5 === 0 && index < 15 ? value * 2 : value)), step })).json?.error?.code === 'invalid_transform')
+  check('an alignment may not mirror a model', (await planningJson(assetPath, 'PATCH', { transform: [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], step })).json?.error?.code === 'invalid_transform')
+  check('a rigid alignment is accepted', (await planningJson(assetPath, 'PATCH', { transform: [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], step })).status === 200)
+  const stranger = await submitForm('/login', { email: adminEmail, password: adminPassword })
+  const asStranger = { cookie: cookieFrom(stranger) ?? '', origin: base }
+  check('another account cannot download the model', (await fetch(base + assetPath, { headers: asStranger })).status === 404)
+  check('another account cannot open the case', (await fetch(`${base}/planning/${caseId}`, { headers: asStranger })).status === 404)
+  check('another account cannot delete the case', (await planningJson(`/api/planning/cases/${caseId}`, 'DELETE', undefined, asStranger)).status === 404)
+}
+check('a plan without soft-tissue values is refused', (await planningJson(`/api/planning/cases/${caseId}`, 'PATCH', { plan: { operations: [{ id: 'a', kind: 'implant', label: 'x', region: 'chin', geometry: { type: 'ellipsoid', sizeMm: [10, 10, 10] }, positionMm: [0, 0, 0], rotationDeg: [0, 0, 0] }] } })).status === 400)
+check('a cross-site planning request is refused', (await planningJson('/api/planning/cases', 'POST', { title: 'x', consent: true }, { cookie: userCookie ?? '', origin: 'https://evil.example' })).status === 403)
+check('deleting the case removes it', (await planningJson(`/api/planning/cases/${caseId}`, 'DELETE')).status === 200 && (await fetch(`${base}/planning/${caseId}`, { headers: asUser })).status === 404)
+
 // Payments
 const checkout = await fetch(base + '/api/stripe/checkout', { method: 'POST', headers: { ...asUser, 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'pro', interval: 'MONTHLY' }) })
 const checkoutJson = await checkout.json().catch(() => null)

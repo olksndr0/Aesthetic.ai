@@ -61,7 +61,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       setup: 'Set GEMINI_API_KEY (and optionally GEMINI_IMAGE_MODEL) in the server environment.',
     })
   }
-  if (result.photoStatus === 'processing') return jsonError(409, 'busy', 'A photographic render of this result is already running.')
   const limit = rateLimit(`photoreal:${user.id}`, 6, 10 * 60_000)
   if (!limit.ok) return jsonError(429, 'rate_limited', `Too many renders. Try again in ${limit.retryAfterSeconds} seconds.`)
 
@@ -73,14 +72,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const operations = planSchema.parse(result.plan).operations.map(describeOperation)
   const file = (label: string) => result.files.find(item => item.label === label)
 
-  const charged = await db.user.updateMany({ where: { id: user.id, credits: { gt: 0 } }, data: { credits: { decrement: 1 } } })
-  if (charged.count === 0) return jsonError(402, 'no_credits', 'You have no simulations left. Choose a plan to continue.')
-
-  // A new run replaces the photographs of an earlier one.
+  // A successful run replaces the photographs of an earlier one; a failed run leaves them as they were.
   const stale = result.files.filter(item => item.label.endsWith(':photo'))
-  await removeAssetFiles(stale)
-  await db.caseAsset.deleteMany({ where: { id: { in: stale.map(item => item.id) } } })
-  await db.caseResult.update({ where: { id }, data: { photoStatus: 'processing', photoError: null } })
+
+  // One run at a time per result. A run that never finished (server restart) stops blocking after ten minutes.
+  const claimed = await db.caseResult.updateMany({
+    where: { id, OR: [{ photoStatus: { not: 'processing' } }, { photoStartedAt: null }, { photoStartedAt: { lt: new Date(Date.now() - 10 * 60_000) } }] },
+    data: { photoStatus: 'processing', photoStartedAt: new Date(), photoError: null },
+  })
+  if (claimed.count === 0) return jsonError(409, 'busy', 'A photographic render of this result is already running.')
+  const release = (photoStatus: string) => db.caseResult.update({ where: { id }, data: { photoStatus } })
+
+  const charged = await db.user.updateMany({ where: { id: user.id, credits: { gt: 0 } }, data: { credits: { decrement: 1 } } })
+  if (charged.count === 0) {
+    await release(stale.length > 0 ? 'completed' : 'none')
+    return jsonError(402, 'no_credits', 'You have no simulations left. Choose a plan to continue.')
+  }
+
 
   const created: CaseAsset[] = []
   try {
@@ -135,6 +143,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       checks[output.view] = { ...output.check, photoAssetId: asset.id, references: output.references }
     }
 
+    await removeAssetFiles(stale)
+    await db.caseAsset.deleteMany({ where: { id: { in: stale.map(item => item.id) } } })
     await db.caseResult.update({
       where: { id },
       data: { photoStatus: 'completed', provider: `gemini:${env.ai.geminiModel}`, views: views.map(view => ({ ...view, photo: checks[view.view] })) },
@@ -150,7 +160,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await removeAssetFiles(created.filter(asset => asset.key))
     await db.$transaction([
       db.caseAsset.deleteMany({ where: { id: { in: created.map(asset => asset.id) } } }),
-      db.caseResult.update({ where: { id }, data: { photoStatus: 'failed', photoError: detail.slice(0, 500) } }),
+      db.caseResult.update({ where: { id }, data: { photoStatus: stale.length > 0 ? 'completed' : 'failed', photoError: detail.slice(0, 500) } }),
       db.user.update({ where: { id: user.id }, data: { credits: { increment: 1 } } }),
     ])
     return jsonError(code === 'content_rejected' ? 422 : 502, code, MESSAGES[code] ?? MESSAGES.provider_error!, { detail: detail.slice(0, 300) })

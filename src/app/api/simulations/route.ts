@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       503,
       'not_configured',
       'The AI image provider is not configured on this server yet, so no simulation was generated and no credit was used.',
-      { setup: 'Set OPENAI_API_KEY or REPLICATE_API_TOKEN in the server environment (see README, "AI provider").' },
+      { setup: 'Set OPENAI_API_KEY, REPLICATE_API_TOKEN or GEMINI_API_KEY in the server environment (see README, "AI provider").' },
     )
   }
 

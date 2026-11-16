@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-type Props = { beforeSrc: string; afterSrc: string; downloadHref?: string }
+type Props = { beforeSrc: string; afterSrc: string; downloadHref?: string; beforeLabel?: string; afterLabel?: string; downloadLabel?: string }
 
-export function BeforeAfter({ beforeSrc, afterSrc, downloadHref }: Props) {
+export function BeforeAfter({ beforeSrc, afterSrc, downloadHref, beforeLabel = 'Before', afterLabel = 'AI Simulation', downloadLabel = 'Download result' }: Props) {
   const frame = useRef<HTMLDivElement>(null)
   const shell = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState(100)
@@ -85,7 +85,7 @@ export function BeforeAfter({ beforeSrc, afterSrc, downloadHref }: Props) {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={afterSrc}
-            alt="AI simulation of the result"
+            alt={afterLabel}
             draggable={false}
             onLoad={playIntro}
             className="absolute inset-0 h-full w-full object-cover"
@@ -93,7 +93,7 @@ export function BeforeAfter({ beforeSrc, afterSrc, downloadHref }: Props) {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={beforeSrc}
-            alt="Your original photo"
+            alt={beforeLabel}
             draggable={false}
             onLoad={event => setRatio(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight)}
             className="absolute inset-0 h-full w-full object-cover"
@@ -101,10 +101,10 @@ export function BeforeAfter({ beforeSrc, afterSrc, downloadHref }: Props) {
           />
 
           <span className="glass pointer-events-none absolute left-3 top-3 rounded-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ opacity: position > 12 ? 1 : 0 }}>
-            Before
+            {beforeLabel}
           </span>
           <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-white px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-ink" style={{ opacity: position < 82 ? 1 : 0 }}>
-            AI Simulation
+            {afterLabel}
           </span>
 
           <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 w-px bg-white shadow-[0_0_24px_rgba(255,255,255,0.7)]" style={{ left: `${position}%` }}>
@@ -134,7 +134,7 @@ export function BeforeAfter({ beforeSrc, afterSrc, downloadHref }: Props) {
         </button>
         {downloadHref && (
           <a href={downloadHref} download className="btn-primary btn-sm min-h-[44px]">
-            Download result
+            {downloadLabel}
           </a>
         )}
       </div>

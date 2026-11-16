@@ -50,6 +50,11 @@ export default function PrivacyPage() {
           <strong className="text-white">Your photos and simulations are never used to train AI models.</strong> If that were ever proposed, it would require a separate, explicit and informed consent that you could refuse without losing the service.
         </p>
         <p>Upload only photos of yourself, or of an adult who has clearly authorised you. Photos of anyone under 18 are not permitted.</p>
+        <p>
+          <strong className="text-white">3D planning.</strong> Scans, 3D models of the skull and face, landmarks and measurements are data concerning health. They are processed only with your explicit consent, given when a case is created. A
+          CT or CBCT volume is read in your browser and is not uploaded: only the bone and skin surfaces extracted from it are stored. Nothing from a case is sent to an external image provider unless you give a second, separate consent;
+          in that case only rendered views of the model, the photographs you added and the description of the planned procedure are sent, never the scan, the 3D models, the measurements or your name.
+        </p>
 
         <h2>4. Who receives your data</h2>
         <ul>

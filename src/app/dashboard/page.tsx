@@ -38,6 +38,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <Link href="/simulator" className="btn-primary btn-sm min-h-[44px]">
             New simulation
           </Link>
+          <Link href="/planning" className="btn-ghost btn-sm min-h-[44px]">
+            3D planning
+          </Link>
           <form action={logoutAction}>
             <button type="submit" className="btn-ghost btn-sm min-h-[44px]">
               Log out

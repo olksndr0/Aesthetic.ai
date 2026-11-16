@@ -85,6 +85,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     const result = await db.caseResult.create({ data: { caseId: id, plan, engine: { ...ENGINE }, stats, views } })
+    const files: Record<string, string> = {}
     for (const image of images) {
       const asset = await db.caseAsset.create({
         data: { caseId: id, resultId: result.id, kind: 'render', provenance: 'derived', label: image.label, key: '', bytes: image.data.length },
@@ -92,8 +93,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const key = assetKey(user.id, id, asset.id, 'png')
       await storage().put(key, image.data, 'image/png')
       await db.caseAsset.update({ where: { id: asset.id }, data: { key } })
+      files[image.label] = asset.id
     }
-    return NextResponse.json({ id: result.id })
+    return NextResponse.json({ id: result.id, createdAt: result.createdAt.toISOString(), files })
   } catch (error) {
     return planningFailure(error)
   }

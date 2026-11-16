@@ -5,14 +5,14 @@ import type { Vec3 } from '@/lib/anatomy/math'
 import type { Mesh } from '@/lib/anatomy/mesh'
 import type { ViewDefinition } from '@/lib/anatomy/views'
 
+import { STATUS_COLOURS, type MarkerStatus } from './status'
+
 export type LayerName = 'skull' | 'face'
 export type ModelState = 'before' | 'after'
-export type MarkerStatus = 'acquired' | 'estimated' | 'modified'
 export type Marker = { id: string; label: string; position: Vec3; status: MarkerStatus }
 export type MeasureLine = { points: Vec3[]; label: string }
 export type PickHit = { layer: LayerName | 'implant'; point: Vec3 }
 
-export const STATUS_COLOURS: Record<MarkerStatus, string> = { acquired: '#ffffff', estimated: '#ffb454', modified: '#7fb2ff' }
 const LAYER_COLOURS: Record<LayerName, string> = { skull: '#e9e3d3', face: '#d2c7bd' }
 const IMPLANT_COLOUR = '#7fb2ff'
 const CHANGE_COLOUR = new THREE.Color('#ffb454')
@@ -283,11 +283,11 @@ export class AnatomyViewer {
       position: 'absolute',
       left: '0',
       top: '0',
-      margin: muted ? '-7px 0 0 -4px' : '-22px 0 0 8px',
-      font: `${muted ? 10 : 11}px ui-monospace, monospace`,
+      margin: muted ? '-8px 0 0 -5px' : '-22px 0 0 8px',
+      font: `${muted ? 12 : 11}px ui-monospace, monospace`,
       letterSpacing: '0.04em',
       color: colour,
-      opacity: muted ? '0.55' : '1',
+      opacity: muted ? '0.7' : '1',
       textShadow: '0 0 4px #000, 0 0 2px #000',
       whiteSpace: 'nowrap',
     })
@@ -343,17 +343,18 @@ export class AnatomyViewer {
   private updateAxisLabels(): void {
     for (const label of this.axisLabels) label.element.remove()
     this.axisLabels = []
-    const sphere = this.bounds()
-    if (!sphere) return
-    const r = sphere.radius * 1.08
-    const c = sphere.center
+    const box = new THREE.Box3()
+    for (const layer of this.layers.values()) box.union(new THREE.Box3().setFromBufferAttribute(new THREE.BufferAttribute(layer.before, 3)))
+    if (box.isEmpty()) return
+    const c = box.getCenter(new THREE.Vector3())
+    const pad = 6
     const letters: Array<[string, Vec3]> = [
-      ['L', [c.x + r, c.y, c.z]],
-      ['R', [c.x - r, c.y, c.z]],
-      ['S', [c.x, c.y + r, c.z]],
-      ['I', [c.x, c.y - r, c.z]],
-      ['A', [c.x, c.y, c.z + r]],
-      ['P', [c.x, c.y, c.z - r]],
+      ['L', [box.max.x + pad, c.y, c.z]],
+      ['R', [box.min.x - pad, c.y, c.z]],
+      ['S', [c.x, box.max.y + pad, c.z]],
+      ['I', [c.x, box.min.y - pad, c.z]],
+      ['A', [c.x, c.y, box.max.z + pad]],
+      ['P', [c.x, c.y, box.min.z - pad]],
     ]
     this.axisLabels = letters.map(([text, position]) => this.makeLabel(text, '#ffffff', position, true))
   }

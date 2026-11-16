@@ -29,7 +29,7 @@ export default async function AdminOverviewPage() {
     ['Average generation', average._avg.durationMs ? `${(average._avg.durationMs / 1000).toFixed(1)} s` : 'n/a', 'Completed simulations'],
   ]
   const services: Array<[string, boolean, string]> = [
-    ['AI provider', aiConfigured(), env.ai.provider ?? 'Set OPENAI_API_KEY or REPLICATE_API_TOKEN'],
+    ['AI provider', aiConfigured(), env.ai.provider ?? 'Set OPENAI_API_KEY, REPLICATE_API_TOKEN or GEMINI_API_KEY'],
     ['Stripe payments', Boolean(env.stripe.secretKey && env.stripe.webhookSecret), 'STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET'],
     ['Transactional email', Boolean(env.email.resendKey), 'RESEND_API_KEY'],
     ['Scheduled cleanup', Boolean(env.cronSecret), 'CRON_SECRET'],

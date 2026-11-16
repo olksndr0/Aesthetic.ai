@@ -13,6 +13,7 @@ export const SITE = {
 
 export const NAV_LINKS = [
   { href: '/simulator', label: 'AI Simulator' },
+  { href: '/planning', label: '3D Planning' },
   { href: '/procedures', label: 'Procedures' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/about', label: 'About' },

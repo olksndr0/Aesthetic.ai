@@ -15,6 +15,7 @@ export const CONTENT_DEFAULTS = {
     'Aesthetic AI builds visual tools that help people prepare for a conversation with a qualified surgeon. We show a possibility, clearly labelled as one, and leave the medical judgement to doctors.',
   'disclaimer.short':
     'AI simulations are illustrative only. They are not a clinical prediction or a guarantee of a surgical result and do not replace a medical consultation.',
+  'planning.disclaimer': 'Illustrative simulation: the actual result may differ.',
 } as const
 
 export type ContentKey = keyof typeof CONTENT_DEFAULTS
@@ -30,6 +31,7 @@ export const CONTENT_LABELS: Record<ContentKey, string> = {
   'privacy.title': 'Home: privacy section title',
   'about.mission': 'About: mission paragraph',
   'disclaimer.short': 'Disclaimer shown beside results',
+  'planning.disclaimer': '3D planning: notice shown on every result',
 }
 
 export const DEFAULT_FAQS: Array<{ question: string; answer: string }> = [

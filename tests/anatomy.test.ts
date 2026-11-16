@@ -7,7 +7,7 @@ import { checkSides, measureValue, parseLandmarkTable, type Landmark } from '@/l
 import { IDENTITY, LPS_TO_CANONICAL, applyPoint, det3, distance, invert, multiply, orientationMatrix, rigid, type Vec3 } from '@/lib/anatomy/math'
 import { MeshError, bounds, clusterVertices, computeNormals, decodeMesh, ellipsoidMesh, encodeMesh, keepLargeComponents, transformMesh } from '@/lib/anatomy/mesh'
 import { planSchema, type Plan } from '@/lib/anatomy/plan'
-import { fitRigid, refineSurfaceFit } from '@/lib/anatomy/registration'
+import { fitRigid } from '@/lib/anatomy/registration'
 import { displacedLandmarks, prepareSimulation, simulate } from '@/lib/anatomy/simulate'
 import { RESULT_VIEWS, VIEW_DEFINITIONS, viewDefinition } from '@/lib/anatomy/views'
 
@@ -212,14 +212,6 @@ describe('registration', () => {
     expect(Math.max(...noisy.residuals)).toBeLessThan(2)
     expect(() => fitRigid(source.slice(0, 2), source.slice(0, 2))).toThrow()
   })
-
-  it('refines a rough surface alignment', () => {
-    const reference = clusterVertices(ellipsoidMesh([120, 180, 150], 240), 1e-4)
-    const moving = transformMesh(reference, rigid([3, -2, 2.5], [3, -2, 4], [0, 0, 0]))
-    const fit = refineSurfaceFit(moving.positions, reference.positions)
-    expect(fit.rmsBefore).toBeGreaterThan(1)
-    expect(fit.rms).toBeLessThan(fit.rmsBefore / 2)
-  })
 })
 
 describe('simulation', () => {
@@ -324,6 +316,14 @@ describe('simulation', () => {
     )
     expect(far.maxSkinMm).toBe(0)
     expect(far.operations[0]!.warnings[0]).toMatch(/more than 60 mm/)
+
+    // An implant hanging in the air near the bone is reported, not silently applied.
+    const floating = simulate(
+      context,
+      plan([{ id: 'f', kind: 'implant', label: 'Floating', region: 'chin', geometry: { type: 'ellipsoid', sizeMm: [10, 10, 10] }, positionMm: [0, 0, 20], rotationDeg: [0, 0, 0], softTissue: { ratio: 1, spreadMm: 5 } }]),
+      new Map([['f', ellipsoidMesh([10, 10, 10])]]),
+    )
+    expect(floating.operations[0]!.warnings[0]).toMatch(/does not touch the bone/)
   })
 
   it('requires the operator to enter the soft-tissue values', () => {

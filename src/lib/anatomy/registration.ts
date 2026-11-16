@@ -1,5 +1,4 @@
-import { PointGrid } from './grid'
-import { IDENTITY, applyPoint, distance, multiply, type Mat4, type Vec3 } from './math'
+import { applyPoint, distance, type Mat4, type Vec3 } from './math'
 
 export type RigidFit = {
   /** Rigid transform (rotation and translation, no scaling) that moves the source points onto the targets. */
@@ -88,46 +87,4 @@ export function fitRigid(source: Vec3[], target: Vec3[]): RigidFit {
   const residuals = source.map((point, i) => distance(applyPoint(matrix, point), target[i]!))
   const rms = Math.sqrt(residuals.reduce((sum, r) => sum + r * r, 0) / n)
   return { matrix, rms, residuals }
-}
-
-export type SurfaceFit = { matrix: Mat4; rmsBefore: number; rms: number; iterations: number; pointsUsed: number }
-
-/**
- * Refines an alignment by iterative closest point: repeatedly pairs sampled
- * points of the moving surface with their nearest reference points and fits
- * rigidly, discarding the worst-matching share so regions absent from one
- * surface (hair, clothing, cropped areas) do not pull the result. Only valid
- * between two surfaces of the same tissue, already roughly aligned.
- */
-export function refineSurfaceFit(moving: Float32Array, reference: Float32Array, options: { samples?: number; iterations?: number; keepShare?: number } = {}): SurfaceFit {
-  const samples = options.samples ?? 3000
-  const keepShare = options.keepShare ?? 0.8
-  const count = moving.length / 3
-  const stride = Math.max(1, Math.floor(count / samples))
-  const points: Vec3[] = []
-  for (let i = 0; i < count; i += stride) points.push([moving[i * 3]!, moving[i * 3 + 1]!, moving[i * 3 + 2]!])
-
-  const grid = new PointGrid(reference, 4)
-  let matrix = IDENTITY
-  let rmsBefore = 0
-  let rms = 0
-  let iterations = 0
-
-  for (; iterations < (options.iterations ?? 30); iterations += 1) {
-    const pairs = points
-      .map(point => {
-        const moved = applyPoint(matrix, point)
-        const hit = grid.nearest(moved[0], moved[1], moved[2])
-        return { moved, target: [reference[hit.index * 3]!, reference[hit.index * 3 + 1]!, reference[hit.index * 3 + 2]!] as Vec3, d: hit.distance }
-      })
-      .sort((a, b) => a.d - b.d)
-    const kept = pairs.slice(0, Math.max(3, Math.floor(pairs.length * keepShare)))
-    const current = Math.sqrt(kept.reduce((sum, pair) => sum + pair.d * pair.d, 0) / kept.length)
-    if (iterations === 0) rmsBefore = current
-    const converged = iterations > 0 && Math.abs(rms - current) < 1e-4
-    rms = current
-    if (converged) break
-    matrix = multiply(fitRigid(kept.map(pair => pair.moved), kept.map(pair => pair.target)).matrix, matrix)
-  }
-  return { matrix, rmsBefore, rms, iterations, pointsUsed: points.length }
 }
