@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum SimulationStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id                   String           @id @default(cuid())
+  email                String           @unique
+  passwordHash         String
+  name                 String?
+  role                 Role             @default(USER)
+  credits              Int              @default(0)
+  planSlug             String           @default("starter")
+  billingInterval      BillingInterval?
+  stripeCustomerId     String?          @unique
+  stripeSubscriptionId String?          @unique
+  subscriptionStatus   String?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  sessions    Session[]
+  resetTokens PasswordResetToken[]
+  simulations Simulation[]
+
+  @@index([planSlug])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Plan {
+  slug              String   @id
+  name              String
+  description       String   @default("")
+  priceMonthlyCents Int
+  priceYearlyCents  Int
+  credits           Int
+  features          String[]
+  allProcedures     Boolean  @default(false)
+  highResolution    Boolean  @default(false)
+  history           Boolean  @default(false)
+  priority          Boolean  @default(false)
+  popular           Boolean  @default(false)
+  active            Boolean  @default(true)
+  sortOrder         Int      @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
+model Simulation {
+  id           String           @id @default(cuid())
+  userId       String
+  procedure    String
+  params       Json
+  status       SimulationStatus @default(PROCESSING)
+  originalKey  String?
+  resultKey    String?
+  provider     String?
+  errorCode    String?
+  errorMessage String?
+  durationMs   Int?
+  consentAt    DateTime
+  createdAt    DateTime         @default(now())
+  expiresAt    DateTime?
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([expiresAt])
+}
+
+model Faq {
+  id        String   @id @default(cuid())
+  question  String
+  answer    String
+  sortOrder Int      @default(0)
+  published Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+model SiteContent {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String
+  message   String
+  createdAt DateTime @default(now())
+}
+
+model StripeEvent {
+  id        String   @id
+  type      String
+  createdAt DateTime @default(now())
+}
